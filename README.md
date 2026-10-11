@@ -9,7 +9,7 @@
 ![Hacktoberfest 2026](https://img.shields.io/badge/Hacktoberfest-2026-ff69b4?style=for-the-badge)
 ![Challenge](https://img.shields.io/badge/Challenge-Touch%20Grass-2ea44f?style=for-the-badge)
 ![Offline](https://img.shields.io/badge/100%25-Offline-0a7ea4?style=for-the-badge)
-![Python](https://img.shields.io/badge/Python-3.x-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.14.5-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-Backend-000000?style=for-the-badge&logo=flask&logoColor=white)
 ![Ollama](https://img.shields.io/badge/Ollama-Local%20AI-black?style=for-the-badge)
 ![SQLite](https://img.shields.io/badge/SQLite-Embedded-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
@@ -131,7 +131,6 @@ Interaction history and pet status are stored in an embedded **SQLite** database
 │  🧠 gemma:2b  (personality)    👁️ llava  (vision judge)          │
 └──────────────────────────────────────────────────────────────────┘
 ```
-
 ---
 
 ## ⚙️ Installation & Setup
