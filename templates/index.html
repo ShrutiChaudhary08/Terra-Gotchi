@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terra-Gotchi</title>
+    <style>
+        body { font-family: system-ui, sans-serif; text-align: center; background-color: #f4faeb; padding: 30px; color: #333; }
+        .pet-container { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 20px rgba(0,0,0,0.1); max-width: 480px; margin: auto; }
+        h1 { color: #2c7a4b; margin-bottom: 5px; }
+        .emoji { font-size: 80px; margin: 15px 0; }
+        
+        .btn { background-color: #2c7a4b; color: white; border: none; padding: 12px 20px; font-size: 15px; border-radius: 25px; cursor: pointer; transition: 0.3s; margin: 5px; display: inline-block;}
+        .btn:hover { background-color: #1e5c36; }
+        .btn-feed { background-color: #d97706; }
+        .btn-feed:hover { background-color: #b45309; }
+        
+        #response-text { margin: 15px 0; font-size: 18px; font-weight: bold; min-height: 48px; }
+        .status { font-size: 13px; color: #666; margin-top: 10px; }
+
+        .feed-section { margin-top: 20px; padding-top: 20px; border-top: 2px dashed #e5e7eb; }
+        
+        #camera-container { display: none; margin-top: 15px; }
+        #webcam { max-width: 100%; border-radius: 12px; border: 2px solid #2c7a4b; }
+        #preview { max-width: 100%; max-height: 250px; border-radius: 12px; margin-top: 10px; display: none; }
+        
+        /* File upload button styling */
+        input[type="file"] { display: none; }
+        .upload-label { background-color: #475569; color: white; border: none; padding: 12px 20px; font-size: 15px; border-radius: 25px; cursor: pointer; transition: 0.3s; margin: 5px; display: inline-block; }
+        .upload-label:hover { background-color: #334155; }
+    </style>
+</head>
+<body>
+
+    <div class="pet-container">
+        <h1>Terra-Gotchi 🌿</h1>
+        <div id="pet-avatar" class="emoji">😴</div>
+        
+        <button id="wake-btn" class="btn" onclick="wakeUpPet()">Ask for Craving</button>
+        <div id="response-text">Click above to wake up your pet!</div>
+
+        <div class="feed-section">
+            <h3>Feed Terra-Gotchi</h3>
+            
+            <!-- Camera AND Upload Buttons -->
+            <button id="start-camera-btn" class="btn" onclick="startCamera()">📷 Live Camera</button>
+            <label class="upload-label">
+                📂 Upload Photo
+                <input type="file" id="image-upload" accept="image/*" onchange="uploadImage(event)">
+            </label>
+            
+            <div id="camera-container">
+                <video id="webcam" autoplay playsinline></video>
+                <br>
+                <button id="snap-btn" class="btn" onclick="takeSnapshot()">📸 Snap Photo</button>
+            </div>
+
+            <!-- Hidden canvas to process the photo -->
+            <canvas id="canvas" style="display: none;"></canvas>
+
+            <!-- Result preview -->
+            <img id="preview" alt="Food preview">
+            <br>
+            <button id="feed-btn" class="btn btn-feed" onclick="feedPet()" style="display:none;">Munch This Item! 🍃</button>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <script>
+        let currentCraving = "";
+        let videoStream = null;
+        let capturedBlob = null;
+
+        async function wakeUpPet() {
+            const btn = document.getElementById('wake-btn');
+            const responseText = document.getElementById('response-text');
+            const statusText = document.getElementById('status');
+            const avatar = document.getElementById('pet-avatar');
+
+            btn.disabled = true;
+            btn.innerText = "Thinking...";
+            avatar.innerText = "🤔";
+            statusText.innerText = "Connecting to local AI...";
+
+            try {
+                const response = await fetch('/api/wake');
+                const data = await response.json();
+
+                currentCraving = data.message;
+                responseText.innerText = `🌿 "${data.message}"`;
+                avatar.innerText = "😋";
+                statusText.innerText = "Craving stored. Feed me!";
+
+                const speech = new SpeechSynthesisUtterance(data.message);
+                speech.rate = 0.9;
+                window.speechSynthesis.speak(speech);
+
+            } catch (error) {
+                responseText.innerText = "Error waking up pet.";
+                statusText.innerText = "Check terminal logs.";
+            }
+
+            btn.disabled = false;
+            btn.innerText = "Ask for Craving";
+        }
+
+        // --- CAMERA LOGIC ---
+        async function startCamera() {
+            const video = document.getElementById('webcam');
+            const container = document.getElementById('camera-container');
+            const startBtn = document.getElementById('start-camera-btn');
+            const preview = document.getElementById('preview');
+            const feedBtn = document.getElementById('feed-btn');
+            
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = videoStream;
+                
+                container.style.display = "block";
+                startBtn.style.display = "none";
+                preview.style.display = "none";
+                feedBtn.style.display = "none";
+            } catch (err) {
+                alert("Camera access denied or unavailable: " + err.message);
+            }
+        }
+
+        function takeSnapshot() {
+            const video = document.getElementById('webcam');
+            const canvas = document.getElementById('canvas');
+            const preview = document.getElementById('preview');
+            const feedBtn = document.getElementById('feed-btn');
+            const container = document.getElementById('camera-container');
+            const startBtn = document.getElementById('start-camera-btn');
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            canvas.toBlob((blob) => {
+                capturedBlob = blob;
+                preview.src = URL.createObjectURL(blob);
+                
+                preview.style.display = "inline-block";
+                feedBtn.style.display = "inline-block";
+                
+                videoStream.getTracks().forEach(track => track.stop());
+                container.style.display = "none";
+                
+                startBtn.style.display = "inline-block";
+                startBtn.innerText = "📷 Retake Photo";
+            }, 'image/jpeg');
+        }
+
+        // --- FILE UPLOAD LOGIC ---
+        function uploadImage(event) {
+            const file = event.target.files[0];
+            const preview = document.getElementById('preview');
+            const feedBtn = document.getElementById('feed-btn');
+            const container = document.getElementById('camera-container');
+            const startBtn = document.getElementById('start-camera-btn');
+
+            if (file) {
+                capturedBlob = file; // Store the uploaded file instead of the canvas blob
+                preview.src = URL.createObjectURL(file);
+                
+                preview.style.display = "inline-block";
+                feedBtn.style.display = "inline-block";
+
+                // Turn off camera if it was running
+                if (videoStream) {
+                    videoStream.getTracks().forEach(track => track.stop());
+                }
+                container.style.display = "none";
+                startBtn.style.display = "inline-block";
+                startBtn.innerText = "📷 Live Camera";
+            }
+        }
+
+        // --- FEED LOGIC ---
+        async function feedPet() {
+            const responseText = document.getElementById('response-text');
+            const statusText = document.getElementById('status');
+            const avatar = document.getElementById('pet-avatar');
+            const feedBtn = document.getElementById('feed-btn');
+
+            if (!capturedBlob) {
+                alert("Please snap or upload a photo first!");
+                return;
+            }
+
+            feedBtn.disabled = true;
+            statusText.innerText = "Analyzing meal with local AI...";
+
+            const formData = new FormData();
+            formData.append('image', capturedBlob, "snapshot.jpg");
+            formData.append('craving', currentCraving);
+
+            try {
+                const response = await fetch('/api/feed', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                responseText.innerText = `🌿 "${data.message}"`;
+                avatar.innerText = "🥳";
+                statusText.innerText = `Meal accepted!`;
+
+                const speech = new SpeechSynthesisUtterance(data.message);
+                speech.rate = 0.9;
+                window.speechSynthesis.speak(speech);
+
+            } catch (error) {
+                responseText.innerText = "Failed to process meal.";
+                statusText.innerText = "Check terminal logs.";
+            }
+            
+            feedBtn.disabled = false;
+        }
+    </script>
+</body>
+</html>
