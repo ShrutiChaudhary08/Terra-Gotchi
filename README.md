@@ -1,235 +1,234 @@
-<div align="center">
-
 # 🌱 Terra-Gotchi 🌍
 
-### *The digital pet that only eats real grass.*
+### *Feed your pet. Explore your world. Discover nature.*
 
-**A 100% offline, multimodal AI companion that makes you go outside.**
+**A portfolio-quality full-stack AI platform that encourages real-world outdoor exploration by transforming physical nature discoveries into nutrition for an evolving virtual companion.**
 
-![Hacktoberfest 2026](https://img.shields.io/badge/Hacktoberfest-2026-ff69b4?style=for-the-badge)
-![Challenge](https://img.shields.io/badge/Challenge-Touch%20Grass-2ea44f?style=for-the-badge)
-![Offline](https://img.shields.io/badge/100%25-Offline-0a7ea4?style=for-the-badge)
-![Python](https://img.shields.io/badge/Python-3.14.5-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Flask](https://img.shields.io/badge/Flask-Backend-000000?style=for-the-badge&logo=flask&logoColor=white)
-![Ollama](https://img.shields.io/badge/Ollama-Local%20AI-black?style=for-the-badge)
-![SQLite](https://img.shields.io/badge/SQLite-Embedded-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
-
-</div>
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react)](https://react.dev/)
+[![Gemini 3.8 Flash](https://img.shields.io/badge/Gemini%20AI-Multimodal%20Vision-8E75C4?style=for-the-badge&logo=google)](https://aistudio.google.com/)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%2B%20Auth-3ECF8E?style=for-the-badge&logo=supabase)](https://supabase.com/)
+[![Vercel](https://img.shields.io/badge/Vercel-Serverless%20Ready-black?style=for-the-badge&logo=vercel)](https://vercel.com/)
 
 ---
 
 ## 📖 Table of Contents
 
-- [✨ What is Terra-Gotchi?](#-what-is-terra-gotchi)
-- [🎮 How It Works](#-how-it-works)
-- [🚀 Key Features](#-key-features)
-- [🧰 Tech Stack](#-tech-stack)
-- [🏗️ Architecture](#️-architecture)
-- [⚙️ Installation & Setup](#️-installation--setup)
-- [🕹️ Usage](#️-usage)
-- [🛠️ Troubleshooting](#️-troubleshooting)
-- [🗺️ Roadmap](#️-roadmap)
-- [🤝 Contributing](#-contributing)
-- [👩‍💻 Author](#-author)
+1. [Problem Statement & Core Concept](#-problem-statement--core-concept)
+2. [System Architecture](#-system-architecture)
+3. [Key Features](#-key-features)
+4. [Multimodal AI & Verification Methodology](#-multimodal-ai--verification-methodology)
+5. [Pet Progression & Evolution Mechanics](#-pet-progression--evolution-mechanics)
+6. [Database Schema & RLS Security](#-database-schema--rls-security)
+7. [REST API Documentation](#-rest-api-documentation)
+8. [Installation & Local Setup](#-installation--local-setup)
+9. [Supabase Setup Guide](#-supabase-setup-guide)
+10. [Vercel Deployment Guide](#-vercel-deployment-guide)
+11. [Automated Testing](#-automated-testing)
 
 ---
 
-## ✨ What is Terra-Gotchi?
+## 💡 Problem Statement & Core Concept
 
-Virtual pets have always asked the same thing of us: *more screen time.* **Terra-Gotchi flips the script.**
+Virtual pets have historically demanded more screen time. **Terra-Gotchi flips the script.**
 
-Terra-Gotchi is an **offline, multimodal AI digital pet** built for the **Hacktoberfest 2026 "Touch Grass" challenge**. You can't feed it by tapping a button. Instead, your pet *craves* something from the real world:
+Its core philosophy is simple:
+> **Technology should bring people closer to nature, not further away from it.**
 
-> 🗣️ *"I'm so hungry... find me a **green leaf**!"*
-> 🗣️ *"I want something **rough**, like **tree bark**!"*
+Terra is a digital companion that survives solely by consuming real-world botanical and geological textures. To feed it, users cannot simply tap a button. Instead:
 
-To feed it, you have to **put the phone down, walk outside, find the object, and photograph it.** A local vision AI then acts as the judge: does your photo actually match the craving? Only then does your pet eat. 🍃
-
-No cloud. No Wi-Fi. No subscriptions. Just you, your pet, and the great outdoors.
+1. **Craving Generated**: Terra asks for an outdoor specimen (e.g. *"Find a serrated green leaf with distinct branching veins"*).
+2. **Real-world Exploration**: The user walks outside into their garden, park, or trail.
+3. **Capture & Analysis**: Using the device's live camera or photo upload, the user captures the specimen.
+4. **Gemini Vision Verification**: Google Gemini 3.8 Flash evaluates the image using computer vision.
+5. **Reward & Evolution**: If verified, Terra is fed, XP is awarded, hunger drops, and the specimen is archived in the permanent Nature Journal.
 
 ---
 
-## 🎮 How It Works
+## 🏗️ System Architecture
 
 ```text
-   🐾 Pet gets hungry
-          │
-          ▼
-   🧠 Gemma generates a craving ("Find me a green leaf!")
-          │
-          ▼
-   🔊 Pet speaks the craving out loud (hands-free)
-          │
-          ▼
-   🚶 You go outside and find the real thing
-          │
-          ▼
-   📸 Snap a photo (live camera or file upload)
-          │
-          ▼
-   👁️ LLaVA judges: does the photo match the craving?
-          │
-     ┌────┴────┐
-     ▼         ▼
-  ✅ Yes     ❌ No
-  Pet eats,  Pet is
-  is happy   unimpressed. Try again!
+┌────────────────────────────────────────────────────────────────────────┐
+│                                CLIENT                                  │
+│  React 18  ·  TypeScript  ·  Tailwind CSS  ·  WebRTC Camera · Speech  │
+└──────────────────┬─────────────────────────────────┬───────────────────┘
+                   │ HTTPS API Requests              │ Supabase Client SDK
+                   ▼                                 ▼
+┌──────────────────────────────────────┐  ┌──────────────────────────────┐
+│        VERCEL / NODE.JS API          │  │       SUPABASE CLOUD         │
+│  /api/pet                            │  │  PostgreSQL (8 tables)       │
+│  /api/challenges/generate            │  │  Row Level Security (RLS)    │
+│  /api/pet/feed (Multimodal)          │  │  Auth (Email + Google OAuth) │
+│  /api/journal                        │  │  Storage ('nature_photos')   │
+│  /api/achievements                   │  └──────────────┬───────────────┘
+└──────────────────┬───────────────────┘                 │
+                   │ Server-Side SDK                     │ Storage URLs
+                   ▼                                     │
+┌──────────────────────────────────────┐                 │
+│      GOOGLE GEMINI 3.8 FLASH         │                 │
+│  • Nature Challenge Generation       │                 │
+│  • Multimodal Vision Verification    │◄────────────────┘
+│  • Botanical Feature Recognition     │
+└──────────────────────────────────────┘
 ```
 
 ---
 
-## 🚀 Key Features
+## ✨ Key Features
 
-### 📡 100% Offline Architecture
-Everything runs locally through **Ollama**. There are no cloud APIs, no accounts and no paid subscriptions, so it works in the middle of a forest with zero signal.
-
-### 🧠 Multimodal AI
-Two local models, two jobs:
-- **`gemma:2b`** powers the pet's personality, moods and cravings.
-- **`llava`** is the vision judge that verifies your photo against the craving.
-
-### 📷 Live WebRTC Camera
-The frontend accesses your device camera directly to capture live snapshots. A **file upload fallback** is included for devices or browsers where camera access isn't available.
-
-### 🔊 Hands-Free Audio
-Using the browser's **Web Speech API**, the pet speaks its cravings out loud, so you can keep your eyes up and your screen in your pocket.
-
-### 💾 Local Memory
-Interaction history and pet status are stored in an embedded **SQLite** database, securely on your own device. Nothing leaves your machine.
+- **Multimodal AI Vision Judge**: Submissions are examined by Gemini 3.8 Flash for authenticity, texture resolution, outdoor setting, and botanical traits.
+- **Dynamic Growth Stages**: Pet evolves across 5 distinct visual stages (`Seedling` → `Sprout` → `Explorer` → `Forest Friend` → `Nature Guardian`).
+- **Interactive Expressions**: Expressive moods including Sleeping, Thinking, Hungry, Happy, Celebrating, and Disappointed.
+- **Nature Journal / Herbarium**: Permanent cloud archive with date, XP, confidence score, and category filters.
+- **Achievement & Streak Engine**: Milestones like *First Discovery*, *Green Explorer*, *Pattern Hunter*, and consecutive day streaks.
+- **Hands-Free Audio**: Browser Web Speech synthesis speaks cravings and pet gratitude aloud.
+- **Responsive Dual Camera**: Live WebRTC camera viewfinder with environment/user lens toggle and file upload fallback.
+- **Dual Mode (Cloud & Guest)**: Seamless Guest mode with full functionality and instant Supabase cloud sync when credentials are provided.
 
 ---
 
-## 🧰 Tech Stack
+## 🧠 Multimodal AI & Verification Methodology
 
-| Layer | Technology | Purpose |
-|:------|:-----------|:--------|
-| 🤖 **AI Engine** | [Ollama](https://ollama.com) | Runs local models on-device |
-| 🧠 **Personality / Logic** | `gemma:2b` | Generates cravings and pet dialogue |
-| 👁️ **Vision Verification** | `llava` | Judges whether the photo matches the craving |
-| ⚙️ **Backend** | Python + Flask | API routes and orchestration |
-| 🗄️ **Database** | SQLite (embedded) | Pet status and interaction history |
-| 🎨 **Frontend** | HTML, CSS, Vanilla JavaScript | UI, camera capture, speech |
-| 🖼️ **Image Processing** | Pillow (PIL) | Preparing photos for the vision model |
+All AI interactions run strictly server-side through `@google/genai` (SDK >= 2.25.0) using the `gemini-3.8-flash` model.
 
----
+### 1. Challenge Generation (`generateAICraving`)
+Takes pet level, pet name, and historical challenges to synthesize non-repetitive outdoor objectives with enforced schema constraints:
 
-## 🏗️ Architecture
-
-```text
-┌──────────────────────────── Browser ────────────────────────────┐
-│  HTML / CSS / Vanilla JS                                         │
-│  📷 WebRTC camera  ·  📁 Upload fallback  ·  🔊 Web Speech API  │
-└───────────────────────────────┬──────────────────────────────────┘
-                                │  HTTP (localhost)
-┌───────────────────────────────▼──────────────────────────────────┐
-│  Flask backend (app.py)                                          │
-│  Pillow image prep  ·  Game logic  ·  SQLite storage 💾          │
-└───────────────────────────────┬──────────────────────────────────┘
-                                │  Ollama client
-┌───────────────────────────────▼──────────────────────────────────┐
-│  Ollama (local)                                                  │
-│  🧠 gemma:2b  (personality)    👁️ llava  (vision judge)          │
-└──────────────────────────────────────────────────────────────────┘
+```json
+{
+  "challenge": "Find a leaf with visible veins",
+  "category": "Plant Patterns",
+  "difficulty": "Easy",
+  "xp_reward": 25,
+  "description": "Look closely at a fallen or living leaf to find intricate branched vein patterns."
+}
 ```
+
+### 2. Multimodal Verification (`verifyImageSubmission`)
+Sends the photograph base64 buffer and structured evaluation prompt to Gemini:
+- Evaluates if the photograph clearly depicts the natural element.
+- Rejects computer screens, plastic objects, indoor rooms, or blurry images.
+- Enforces an authenticity confidence threshold ($\ge 0.65$).
+- Returns structured evaluation with detected specimen, factual reason, and pet feedback.
+
 ---
 
-## ⚙️ Installation & Setup
+## 📈 Pet Progression & Evolution Mechanics
 
-### 📋 Prerequisites
+| Level | Growth Stage | XP Range | Visual Characteristics |
+|:-----:|:-------------|:--------:|:-----------------------|
+| **1** | **Seedling** | 0 – 99 | Tender single green sprout |
+| **2** | **Sprout** | 100 – 249 | Two leafy branches, curious eyes |
+| **3** | **Explorer** | 250 – 449 | Clover foliage & golden bud |
+| **4** | **Forest Friend** | 450 – 699 | Forest crown with vibrant mushroom cap |
+| **5+**| **Nature Guardian**| 700+ | Antler leafy branches & glowing aura |
 
-- **Python 3.14.5** and `pip`
-- **[Ollama](https://ollama.com/download)** installed on your system
-- A device with a camera (or images to upload)
-- A reasonably modern machine: running two local models needs a decent amount of RAM, and `llava` is the heavier of the two
+---
 
-### 1️⃣ Clone the repository
+## 🗄️ Database Schema & RLS Security
 
+The database runs on Supabase PostgreSQL with 8 organized tables and Row Level Security:
+
+1. `profiles`: User preferences (audio, display name, preferred camera).
+2. `pets`: Pet level, XP, happiness, hunger, energy, streak, growth stage.
+3. `challenges`: Active and completed nature cravings with XP values.
+4. `feeding_attempts`: Raw verification audit trail for every submission.
+5. `nature_journal`: Permanent verified discoveries with photo URLs.
+6. `achievements`: Catalog of milestones and rewards.
+7. `user_achievements`: User-unlocked achievement records.
+8. `daily_activity`: Daily feed counts for streak tracking.
+
+The complete SQL migration is located at:
+```bash
+supabase/migrations/001_initial_schema.sql
+```
+
+---
+
+## 🔌 REST API Documentation
+
+| Method | Endpoint | Description |
+|:-------|:---------|:------------|
+| `GET` | `/api/pet` | Fetches pet vitals, level, and active craving |
+| `PUT` | `/api/pet` | Renames pet companion |
+| `POST`| `/api/challenges/generate` | Generates a new context-aware nature craving |
+| `POST`| `/api/challenges/verify` | Standalone vision verification without state change |
+| `POST`| `/api/pet/feed` | Verified multimodal feed: updates XP, vitals, streaks, and journal |
+| `GET` | `/api/journal` | Lists user's nature discoveries |
+| `DELETE` | `/api/journal/:id` | Deletes a journal discovery |
+| `GET` | `/api/achievements` | Returns achievement catalog and unlocked status |
+| `GET` | `/api/health` | Service health and AI connectivity status |
+
+---
+
+## 🚀 Installation & Local Setup
+
+### Prerequisites
+- Node.js 20+ and `npm`
+- Google Gemini API key (from [Google AI Studio](https://aistudio.google.com/))
+- *(Optional)* Free Supabase project (from [supabase.com](https://supabase.com/))
+
+### 1. Clone & Install
 ```bash
 git clone https://github.com/ShrutiChaudhary08/Terra-Gotchi.git
 cd Terra-Gotchi
+npm install
 ```
 
-### 2️⃣ Create a virtual environment & install dependencies
+### 2. Configure Environment
+Create `.env` using `.env.example`:
+```bash
+cp .env.example .env
+```
+Fill in your credentials:
+```ini
+GEMINI_API_KEY=your_gemini_api_key
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+### 3. Run Development Server
+```bash
+npm run dev
+```
+Open `http://localhost:3000` in your browser.
+
+---
+
+## ⚡ Supabase Setup Guide
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. Open the **SQL Editor** in your Supabase dashboard.
+3. Copy the entire contents of `supabase/migrations/001_initial_schema.sql` and run it.
+4. Copy your **Project URL** and **Anon Public Key** from **Project Settings > API**.
+5. Add them to your `.env` or deployment settings as `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+
+---
+
+## 🌐 Vercel Deployment Guide
+
+1. Push your repository to **GitHub**.
+2. Go to [vercel.com](https://vercel.com) and click **Add New Project**.
+3. Import your `Terra-Gotchi` GitHub repository.
+4. Under **Environment Variables**, add:
+   - `GEMINI_API_KEY`
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+5. Click **Deploy**. Vercel will build the Vite frontend and deploy the serverless functions in `/api`.
+
+---
+
+## 🧪 Automated Testing
+
+Unit tests for game mechanics, leveling curves, streak algorithms, and achievement unlocking are written with `vitest`:
 
 ```bash
-# Create the environment
-python -m venv venv
-
-# Activate it
-# macOS / Linux:
-source venv/bin/activate
-# Windows:
-venv\Scripts\activate
-
-# Install dependencies (Flask, ollama, Pillow)
-pip install -r requirements.txt
+npm test
 ```
 
-### 3️⃣ Install Ollama & pull the models
-
-Install Ollama from [ollama.com/download](https://ollama.com/download), then pull both models:
-
-```bash
-ollama pull gemma:2b
-ollama pull llava
-```
-
-> 💡 **Tip:** You need internet only for this one-time download. After the models are pulled, Terra-Gotchi runs fully offline.
-
-### 4️⃣ Run the app
-
-```bash
-python app.py
-```
-
-Then open **http://127.0.0.1:5000** in your browser. 🎉
-
 ---
 
-## 🕹️ Usage
+## 👩‍💻 Credits
 
-1. 🐣 **Meet your pet.** Open the app and check on its status.
-2. 👂 **Listen to the craving.** The pet speaks what it wants ("Find me a green leaf!").
-3. 🚶 **Touch grass.** Go outside and find the real-world item.
-4. 📸 **Snap it.** Use the live camera, or upload a photo.
-5. ⚖️ **Face the judge.** `llava` checks whether your photo matches the craving.
-6. 💚 **Feed & repeat.** Match it and your pet eats. Miss it and you'll have to look harder.
-
----
-
-## 🗺️ Roadmap
-
-- [ ] 🎧 **EchoCatch (Audio Cravings):** local audio classification so the pet can crave ambient nature sounds, like wind or birdsong. Users record audio in the wild to feed it.
-- [ ] 🌤️ **Dynamic Weather Context:** offline logic that adjusts cravings based on time of day (for example, asking you to find *shadows* at noon).
-
-Have an idea? Open an issue. This is a Hacktoberfest project, after all. 🎃
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome, especially during **Hacktoberfest**!
-
-1. 🍴 Fork the repo
-2. 🌿 Create a branch: `git checkout -b feature/amazing-idea`
-3. 💬 Commit your changes: `git commit -m "Add amazing idea"`
-4. 🚀 Push the branch: `git push origin feature/amazing-idea`
-5. 🔃 Open a Pull Request
-
-Good first contributions: new craving ideas, UI polish, accessibility improvements, or help with the roadmap items above.
-
----
-
-## 👩‍💻 Author
-
-**Built with 💚 by Shruti**
-
----
-
-<div align="center">
-
-### 🌳 Now close the laptop and go touch some grass. 🌳
-
-*Your pet is hungry.*
-
-</div>
+Built with 💚 by **Shruti**.  
+Powered by Google Gemini AI and Supabase.

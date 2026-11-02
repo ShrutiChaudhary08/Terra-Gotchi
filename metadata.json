@@ -1,0 +1,7 @@
+{
+  "name": "Terra-Gotchi",
+  "description": "The digital pet that only eats real grass and nature. Go outside, snap photos of nature cravings, and feed your multimodal AI companion.",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
