@@ -6,8 +6,7 @@ import {
   Settings,
   Volume2,
   VolumeX,
-  Mic,
-  MicOff,
+  Speech,
   User,
   LogOut,
   Flame,
@@ -125,12 +124,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onGoH
 
             <button
               onClick={toggleTTS}
-              title={ttsEnabled ? 'Mute pet speech voice' : 'Enable pet voice reading (Web Speech)'}
+              title={ttsEnabled ? 'Mute pet speech voice (Text-to-Speech)' : 'Enable pet speech voice (Web Speech reads cravings aloud)'}
+              aria-label={ttsEnabled ? 'Mute pet speech voice' : 'Enable pet voice reading'}
               className={`p-1.5 rounded-full transition ${
                 ttsEnabled ? 'text-[#2c7a4b] bg-white shadow-xs' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
-              {ttsEnabled ? <Mic size={16} /> : <MicOff size={16} />}
+              <Speech size={16} className={ttsEnabled ? '' : 'opacity-40'} />
             </button>
           </div>
 

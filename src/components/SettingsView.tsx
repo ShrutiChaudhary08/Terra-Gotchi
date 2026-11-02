@@ -3,8 +3,7 @@ import {
   Settings,
   Volume2,
   VolumeX,
-  Mic,
-  MicOff,
+  Speech,
   Camera,
   Database,
   CheckCircle2,
@@ -136,13 +135,13 @@ export const SettingsView: React.FC = () => {
           {/* Web Speech API Voice Reading */}
           <div className="flex items-center justify-between p-4 rounded-2xl bg-gray-50 border border-gray-100">
             <div className="flex items-start gap-3">
-              <div className="p-2 rounded-xl bg-teal-100 text-teal-800 mt-0.5">
-                {ttsEnabled ? <Mic size={18} /> : <MicOff size={18} />}
+              <div className={`p-2 rounded-xl transition ${ttsEnabled ? 'bg-teal-100 text-teal-800' : 'bg-gray-200 text-gray-500'} mt-0.5`}>
+                <Speech size={18} />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-gray-800">Hands-Free Speech Synthesis</h3>
+                <h3 className="font-bold text-sm text-gray-800">Pet Voice Speech (Text-to-Speech)</h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Allow Terra to speak nature cravings and gratitude aloud so you can keep your phone in your pocket.
+                  Allows Terra to read nature cravings and discoveries aloud using your browser's speech synthesis. (Speaker output only; no microphone needed).
                 </p>
               </div>
             </div>
