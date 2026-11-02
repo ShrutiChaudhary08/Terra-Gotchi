@@ -258,6 +258,9 @@ Evaluate this submitted photograph carefully:
         },
       ],
       config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        systemInstruction: "You are the AI multimodal judge for Terra-Gotchi. Evaluate photographs quickly and accurately, outputting strictly valid JSON matching the requested schema.",
+        maxOutputTokens: 600,
         responseMimeType: 'application/json',
         responseSchema: {
           type: Type.OBJECT,

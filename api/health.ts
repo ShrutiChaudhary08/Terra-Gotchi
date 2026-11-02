@@ -2,6 +2,14 @@ import type { Request, Response } from 'express';
 import { isServerSupabaseConfigured } from '../server/supabase.ts';
 
 export default function handler(_req: Request, res: Response) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (_req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   return res.json({
     status: 'ok',
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),

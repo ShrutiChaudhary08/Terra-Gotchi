@@ -8,10 +8,29 @@ import {
   getUserAchievements,
   updatePet,
 } from '../server/supabase.ts';
-import { generateAICraving } from '../server/gemini.ts';
 import { ACHIEVEMENTS_CATALOG } from '../server/routes.ts';
 
+function parseBody(req: any) {
+  if (!req.body) return {};
+  if (typeof req.body === 'string') {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
+  }
+  return req.body;
+}
+
 export default async function handler(req: Request, res: Response) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   try {
     const user = await getUserFromToken(req.headers.authorization);
     if (!user) {
@@ -57,7 +76,8 @@ export default async function handler(req: Request, res: Response) {
     }
 
     if (req.method === 'PUT') {
-      const { name } = req.body || {};
+      const body = parseBody(req);
+      const name = body?.name;
       if (!name || typeof name !== 'string' || name.trim().length > 30) {
         return res.status(400).json({ error: 'Valid pet name required (max 30 chars).' });
       }

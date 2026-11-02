@@ -39,6 +39,69 @@ export const ACHIEVEMENTS_CATALOG = [
   { id: 'nature_guardian', title: 'Nature Guardian', description: 'Evolve your Terra-Gotchi to Level 5.', category: 'Evolution', icon: '🌳', xp_bonus: 500 },
 ];
 
+// Robust JSON request body parser (handles stringified JSON, empty bodies, and objects)
+export function parseRequestBody(req: any) {
+  if (!req.body) return {};
+  if (typeof req.body === 'string') {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
+  }
+  return req.body;
+}
+
+// Extracts image buffer, mimeType, and metadata from either multipart form-data or JSON payloads
+export function extractImageAndMeta(req: any): { buffer: Buffer; mimeType: string; challengeId?: string } | null {
+  // 1. Check multipart file upload
+  if (req.file && req.file.buffer) {
+    const body = parseRequestBody(req);
+    return {
+      buffer: req.file.buffer,
+      mimeType: req.file.mimetype || 'image/jpeg',
+      challengeId: body?.challengeId || body?.challenge_id || req.query?.challengeId,
+    };
+  }
+
+  // 2. Check JSON payload ({ image: "...", imageBase64: "...", photo: "..." })
+  const body = parseRequestBody(req);
+  const rawImage = body?.image || body?.imageBase64 || body?.image_base64 || body?.photo || body?.data;
+
+  if (rawImage && typeof rawImage === 'string') {
+    let base64Data = rawImage;
+    let mimeType = body.mimeType || body.contentType || 'image/jpeg';
+
+    if (rawImage.startsWith('data:')) {
+      const match = rawImage.match(/^data:([^;]+);base64,(.*)$/);
+      if (match) {
+        mimeType = match[1];
+        base64Data = match[2];
+      } else {
+        const commaIdx = rawImage.indexOf(',');
+        if (commaIdx !== -1) {
+          base64Data = rawImage.substring(commaIdx + 1);
+        }
+      }
+    }
+
+    try {
+      const buffer = Buffer.from(base64Data, 'base64');
+      if (buffer.length > 0) {
+        return {
+          buffer,
+          mimeType,
+          challengeId: body.challengeId || body.challenge_id || req.query?.challengeId,
+        };
+      }
+    } catch (err) {
+      console.warn('[ImageExtract] Failed to convert base64 to buffer:', err);
+    }
+  }
+
+  return null;
+}
+
 // Helper to authenticate request
 async function authMiddleware(req: any, res: any, next: any) {
   try {
@@ -132,10 +195,11 @@ router.get('/wake', authMiddleware, async (req: any, res) => {
   }
 });
 
-// 2. PUT /api/pet - Update pet name or appearance
+// 2. PUT /api/pet - Update pet name or appearance (Accepts JSON body or stringified JSON)
 router.put('/pet', authMiddleware, async (req: any, res) => {
   try {
-    const { name } = req.body;
+    const body = parseRequestBody(req);
+    const { name } = body;
     if (!name || typeof name !== 'string' || name.trim().length > 30) {
       return res.status(400).json({ error: 'Valid pet name required (max 30 chars).' });
     }
@@ -147,9 +211,10 @@ router.put('/pet', authMiddleware, async (req: any, res) => {
   }
 });
 
-// 3. POST /api/challenges/generate - Generate new AI craving
+// 3. POST /api/challenges/generate - Generate new AI craving (Accepts JSON body or empty body)
 router.post('/challenges/generate', authMiddleware, async (req: any, res) => {
   try {
+    const body = parseRequestBody(req);
     const pet = await getOrCreatePet(req.user.id);
     const journal = await getJournalEntries(req.user.id);
     const previousTitles = journal.map((j) => j.title);
@@ -158,7 +223,7 @@ router.post('/challenges/generate', authMiddleware, async (req: any, res) => {
       petLevel: pet.level,
       petName: pet.name,
       previousChallenges: previousTitles,
-      categoryPreference: req.body?.category,
+      categoryPreference: body?.category || body?.categoryPreference,
     });
 
     const saved = await saveChallenge(req.user.id, {
@@ -179,23 +244,24 @@ router.post('/challenges/generate', authMiddleware, async (req: any, res) => {
   }
 });
 
-// 4. POST /api/challenges/verify - Standalone image verification without state mutation
+// 4. POST /api/challenges/verify - Standalone image verification (Accepts JSON input OR multipart form-data)
 router.post('/challenges/verify', authMiddleware, upload.single('image'), async (req: any, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No image uploaded' });
+    const imagePayload = extractImageAndMeta(req);
+    if (!imagePayload) {
+      return res.status(400).json({
+        error: 'No image uploaded. Please provide an image file (multipart/form-data) or JSON payload with base64 image ({ "image": "data:image/jpeg;base64,..." }).',
+      });
     }
 
-    const challengeId = req.body.challengeId;
     const challenge = await getActiveChallenge(req.user.id);
-
-    if (!challenge || (challengeId && challenge.id !== challengeId)) {
+    if (!challenge || (imagePayload.challengeId && challenge.id !== imagePayload.challengeId)) {
       return res.status(404).json({ error: 'Active challenge not found.' });
     }
 
     const pet = await getOrCreatePet(req.user.id);
-    const base64 = req.file.buffer.toString('base64');
-    const mimeType = req.file.mimetype || 'image/jpeg';
+    const base64 = imagePayload.buffer.toString('base64');
+    const mimeType = imagePayload.mimeType || 'image/jpeg';
 
     const verification = await verifyImageSubmission({
       imageBase64: base64,
@@ -213,16 +279,17 @@ router.post('/challenges/verify', authMiddleware, upload.single('image'), async 
   }
 });
 
-// 5. POST /api/pet/feed - Multimodal verification AND secure reward processing
+// 5. POST /api/pet/feed - Multimodal verification AND secure reward processing (Accepts JSON input OR multipart form-data)
 router.post('/pet/feed', authMiddleware, upload.single('image'), async (req: any, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No image uploaded' });
+    const imagePayload = extractImageAndMeta(req);
+    if (!imagePayload) {
+      return res.status(400).json({
+        error: 'No image uploaded. Please provide an image file (multipart/form-data) or JSON payload with base64 image ({ "image": "data:image/jpeg;base64,..." }).',
+      });
     }
 
-    const challengeId = req.body.challengeId;
     let challenge = await getActiveChallenge(req.user.id);
-
     if (!challenge) {
       return res.status(400).json({ error: 'No active challenge found. Please ask Terra for a craving first!' });
     }
@@ -232,8 +299,8 @@ router.post('/pet/feed', authMiddleware, upload.single('image'), async (req: any
     }
 
     const pet = await getOrCreatePet(req.user.id);
-    const base64 = req.file.buffer.toString('base64');
-    const mimeType = req.file.mimetype || 'image/jpeg';
+    const base64 = imagePayload.buffer.toString('base64');
+    const mimeType = imagePayload.mimeType || 'image/jpeg';
 
     // 1. Run server-side Gemini Vision verification
     const verification = await verifyImageSubmission({
@@ -258,7 +325,7 @@ router.post('/pet/feed', authMiddleware, upload.single('image'), async (req: any
     }
 
     // 2. Upload image to Supabase Storage or persistent data URL
-    const imageUrl = await uploadImageToStorage(req.user.id, req.file.buffer, mimeType);
+    const imageUrl = await uploadImageToStorage(req.user.id, imagePayload.buffer, mimeType);
 
     // 3. Mark challenge completed
     await completeChallenge(req.user.id, challenge.id);

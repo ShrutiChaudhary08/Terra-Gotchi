@@ -24,6 +24,7 @@ import {
   type CameraDevice,
   type CameraDiagnostic,
 } from '../lib/camera.ts';
+import { compressImageForUpload } from '../lib/imageCompression.ts';
 
 interface SubmissionModalProps {
   isOpen: boolean;
@@ -169,25 +170,42 @@ export const SubmissionModal: React.FC<SubmissionModalProps> = ({
     startCamera({ facing: nextFacing });
   };
 
-  const takeSnapshot = () => {
+  const takeSnapshot = async () => {
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
-    const width = video.videoWidth || 800;
-    const height = video.videoHeight || 600;
+    const rawWidth = video.videoWidth || 800;
+    const rawHeight = video.videoHeight || 600;
+
+    // Scale to max 1024 to dramatically speed up upload and Gemini vision evaluation
+    const maxDim = 1024;
+    let width = rawWidth;
+    let height = rawHeight;
+    if (rawWidth > maxDim || rawHeight > maxDim) {
+      if (rawWidth > rawHeight) {
+        width = maxDim;
+        height = Math.round((rawHeight * maxDim) / rawWidth);
+      } else {
+        height = maxDim;
+        width = Math.round((rawWidth * maxDim) / rawHeight);
+      }
+    }
 
     canvas.width = width;
     canvas.height = height;
 
     const ctx = canvas.getContext('2d');
     if (ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(video, 0, 0, width, height);
       canvas.toBlob(
-        (blob) => {
+        async (blob) => {
           if (blob) {
-            setCapturedBlob(blob);
-            const url = URL.createObjectURL(blob);
+            const optimizedBlob = await compressImageForUpload(blob, { maxDimension: 1024, quality: 0.82 });
+            setCapturedBlob(optimizedBlob);
+            const url = URL.createObjectURL(optimizedBlob);
             setPreviewUrl(url);
             stopCamera();
             setCameraDiagnostic(null);
@@ -195,24 +213,35 @@ export const SubmissionModal: React.FC<SubmissionModalProps> = ({
           }
         },
         'image/jpeg',
-        0.92
+        0.85
       );
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (!file.type.startsWith('image/')) {
         setAnalysisError('Please choose a valid image file (JPG, PNG, WebP).');
         return;
       }
-      setCapturedBlob(file);
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
-      stopCamera();
-      setCameraDiagnostic(null);
-      setMode('preview');
+      try {
+        const optimizedBlob = await compressImageForUpload(file, { maxDimension: 1024, quality: 0.82 });
+        setCapturedBlob(optimizedBlob);
+        const url = URL.createObjectURL(optimizedBlob);
+        setPreviewUrl(url);
+        stopCamera();
+        setCameraDiagnostic(null);
+        setMode('preview');
+      } catch (err) {
+        console.warn('[Upload] Compression failed, using raw file:', err);
+        setCapturedBlob(file);
+        const url = URL.createObjectURL(file);
+        setPreviewUrl(url);
+        stopCamera();
+        setCameraDiagnostic(null);
+        setMode('preview');
+      }
     }
   };
 
