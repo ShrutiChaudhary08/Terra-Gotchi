@@ -3,6 +3,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/journal/:id",
+      "destination": "/api/journal?id=:id"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },

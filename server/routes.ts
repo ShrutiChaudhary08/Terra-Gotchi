@@ -21,25 +21,24 @@ import {
   uploadImageToStorage,
   isServerSupabaseConfigured,
 } from './supabase.ts';
+import { ACHIEVEMENTS_CATALOG } from './achievements.ts';
+import {
+  extractImagePayload,
+  generateRequestId,
+  sendJsonResponse,
+  sendJsonError,
+} from './apiHelpers.ts';
+
+export { ACHIEVEMENTS_CATALOG };
+export { extractImagePayload as extractImageAndMeta };
 
 const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
 
-// Seed achievement catalog
-export const ACHIEVEMENTS_CATALOG = [
-  { id: 'first_discovery', title: 'First Discovery', description: 'Complete your first nature challenge and feed Terra.', category: 'Milestone', icon: '🌱', xp_bonus: 50 },
-  { id: 'green_explorer', title: 'Green Explorer', description: 'Successfully complete 5 nature challenges outdoors.', category: 'Exploration', icon: '🌿', xp_bonus: 100 },
-  { id: 'pattern_hunter', title: 'Pattern Hunter', description: 'Discover 5 distinct natural patterns and textures.', category: 'Mastery', icon: '🔍', xp_bonus: 100 },
-  { id: 'botanical_scholar', title: 'Botanical Scholar', description: 'Photograph 10 plant, flower or leaf specimens.', category: 'Flora', icon: '🌸', xp_bonus: 150 },
-  { id: 'consistent_explorer', title: 'Consistent Explorer', description: 'Maintain an active 3-day exploration streak.', category: 'Streak', icon: '🔥', xp_bonus: 150 },
-  { id: 'week_in_the_wild', title: 'Week in the Wild', description: 'Touch grass 7 days in a row with your pet.', category: 'Streak', icon: '⭐', xp_bonus: 300 },
-  { id: 'nature_guardian', title: 'Nature Guardian', description: 'Evolve your Terra-Gotchi to Level 5.', category: 'Evolution', icon: '🌳', xp_bonus: 500 },
-];
-
-// Robust JSON request body parser (handles stringified JSON, empty bodies, and objects)
+// Robust JSON request body parser
 export function parseRequestBody(req: any) {
   if (!req.body) return {};
   if (typeof req.body === 'string') {
@@ -52,77 +51,29 @@ export function parseRequestBody(req: any) {
   return req.body;
 }
 
-// Extracts image buffer, mimeType, and metadata from either multipart form-data or JSON payloads
-export function extractImageAndMeta(req: any): { buffer: Buffer; mimeType: string; challengeId?: string } | null {
-  // 1. Check multipart file upload
-  if (req.file && req.file.buffer) {
-    const body = parseRequestBody(req);
-    return {
-      buffer: req.file.buffer,
-      mimeType: req.file.mimetype || 'image/jpeg',
-      challengeId: body?.challengeId || body?.challenge_id || req.query?.challengeId,
-    };
-  }
-
-  // 2. Check JSON payload ({ image: "...", imageBase64: "...", photo: "..." })
-  const body = parseRequestBody(req);
-  const rawImage = body?.image || body?.imageBase64 || body?.image_base64 || body?.photo || body?.data;
-
-  if (rawImage && typeof rawImage === 'string') {
-    let base64Data = rawImage;
-    let mimeType = body.mimeType || body.contentType || 'image/jpeg';
-
-    if (rawImage.startsWith('data:')) {
-      const match = rawImage.match(/^data:([^;]+);base64,(.*)$/);
-      if (match) {
-        mimeType = match[1];
-        base64Data = match[2];
-      } else {
-        const commaIdx = rawImage.indexOf(',');
-        if (commaIdx !== -1) {
-          base64Data = rawImage.substring(commaIdx + 1);
-        }
-      }
-    }
-
-    try {
-      const buffer = Buffer.from(base64Data, 'base64');
-      if (buffer.length > 0) {
-        return {
-          buffer,
-          mimeType,
-          challengeId: body.challengeId || body.challenge_id || req.query?.challengeId,
-        };
-      }
-    } catch (err) {
-      console.warn('[ImageExtract] Failed to convert base64 to buffer:', err);
-    }
-  }
-
-  return null;
-}
-
 // Helper to authenticate request
 async function authMiddleware(req: any, res: any, next: any) {
   try {
     const user = await getUserFromToken(req.headers.authorization);
     if (!user) {
-      return res.status(401).json({ error: 'Unauthorized. Please sign in.' });
+      return sendJsonError(res, 401, 'UNAUTHORIZED', 'Unauthorized. Please sign in.');
     }
     req.user = user;
     next();
   } catch (err: any) {
-    return res.status(401).json({ error: 'Authentication failed.' });
+    return sendJsonError(res, 401, 'AUTH_FAILED', 'Authentication failed.');
   }
 }
 
 // 1. GET /api/pet - Fetch pet stats & active craving (Instant response)
 router.get('/pet', authMiddleware, async (req: any, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const pet = await getOrCreatePet(req.user.id);
     let activeChallenge = await getActiveChallenge(req.user.id);
 
-    // If no active challenge, assign instant nature challenge without blocking on external AI
     if (!activeChallenge) {
       const initial = {
         title: "Find a leaf with visible veins",
@@ -146,7 +97,7 @@ router.get('/pet', authMiddleware, async (req: any, res) => {
     const journal = await getJournalEntries(req.user.id);
     const unlockedAchievements = await getUserAchievements(req.user.id);
 
-    return res.json({
+    return sendJsonResponse(res, 200, {
       pet,
       activeChallenge,
       stats: {
@@ -154,15 +105,23 @@ router.get('/pet', authMiddleware, async (req: any, res) => {
         unlockedCount: unlockedAchievements.length,
         totalAchievements: ACHIEVEMENTS_CATALOG.length,
       },
-    });
+    }, { requestId, route: '/api/pet', method: 'GET', startTime });
   } catch (error: any) {
     console.error('[API /pet] Error:', error);
-    return res.status(500).json({ error: error.message || 'Failed to fetch pet' });
+    return sendJsonError(res, 500, 'FETCH_PET_FAILED', error.message || 'Failed to fetch pet', {
+      requestId,
+      route: '/api/pet',
+      method: 'GET',
+      startTime,
+    });
   }
 });
 
 // Alias for wake-up pet (Instant response)
 router.get('/wake', authMiddleware, async (req: any, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const pet = await getOrCreatePet(req.user.id);
     let activeChallenge = await getActiveChallenge(req.user.id);
@@ -185,34 +144,60 @@ router.get('/wake', authMiddleware, async (req: any, res) => {
         is_completed: false,
       });
     }
-    return res.json({
+    return sendJsonResponse(res, 200, {
       message: activeChallenge.title,
       pet,
       activeChallenge,
-    });
+    }, { requestId, route: '/api/wake', method: 'GET', startTime });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Error waking up pet' });
+    return sendJsonError(res, 500, 'WAKE_FAILED', err.message || 'Error waking up pet', {
+      requestId,
+      route: '/api/wake',
+      method: 'GET',
+      startTime,
+    });
   }
 });
 
-// 2. PUT /api/pet - Update pet name or appearance (Accepts JSON body or stringified JSON)
+// 2. PUT /api/pet - Update pet name
 router.put('/pet', authMiddleware, async (req: any, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const body = parseRequestBody(req);
     const { name } = body;
     if (!name || typeof name !== 'string' || name.trim().length > 30) {
-      return res.status(400).json({ error: 'Valid pet name required (max 30 chars).' });
+      return sendJsonError(res, 400, 'INVALID_PET_NAME', 'Valid pet name required (max 30 chars).', {
+        requestId,
+        route: '/api/pet',
+        method: 'PUT',
+        startTime,
+      });
     }
 
     const updated = await updatePet(req.user.id, { name: name.trim() });
-    return res.json({ pet: updated });
+    return sendJsonResponse(res, 200, { pet: updated }, {
+      requestId,
+      route: '/api/pet',
+      method: 'PUT',
+      startTime,
+    });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Failed to update pet' });
+    return sendJsonError(res, 500, 'UPDATE_PET_FAILED', error.message || 'Failed to update pet', {
+      requestId,
+      route: '/api/pet',
+      method: 'PUT',
+      startTime,
+    });
   }
 });
 
-// 3. POST /api/challenges/generate - Generate new AI craving (Accepts JSON body or empty body)
+// 3. POST /api/challenges/generate - Generate new AI craving
 router.post('/challenges/generate', authMiddleware, async (req: any, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const body = parseRequestBody(req);
     const pet = await getOrCreatePet(req.user.id);
@@ -224,6 +209,7 @@ router.post('/challenges/generate', authMiddleware, async (req: any, res) => {
       petName: pet.name,
       previousChallenges: previousTitles,
       categoryPreference: body?.category || body?.categoryPreference,
+      requestId,
     });
 
     const saved = await saveChallenge(req.user.id, {
@@ -237,26 +223,50 @@ router.post('/challenges/generate', authMiddleware, async (req: any, res) => {
       is_completed: false,
     });
 
-    return res.json({ challenge: saved });
+    return sendJsonResponse(res, 200, { challenge: saved }, {
+      requestId,
+      route: '/api/challenges/generate',
+      method: 'POST',
+      startTime,
+      geminiModel: 'gemini-3.8-flash',
+    });
   } catch (error: any) {
     console.error('[API /challenges/generate] Error:', error);
-    return res.status(500).json({ error: error.message || 'Failed to generate challenge' });
+    return sendJsonError(res, 500, 'GENERATE_CHALLENGE_FAILED', error.message || 'Failed to generate challenge', {
+      requestId,
+      route: '/api/challenges/generate',
+      method: 'POST',
+      startTime,
+    });
   }
 });
 
-// 4. POST /api/challenges/verify - Standalone image verification (Accepts JSON input OR multipart form-data)
+// 4. POST /api/challenges/verify - Standalone image verification (JSON or multipart)
 router.post('/challenges/verify', authMiddleware, upload.single('image'), async (req: any, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
-    const imagePayload = extractImageAndMeta(req);
+    const imagePayload = extractImagePayload(req);
     if (!imagePayload) {
-      return res.status(400).json({
-        error: 'No image uploaded. Please provide an image file (multipart/form-data) or JSON payload with base64 image ({ "image": "data:image/jpeg;base64,..." }).',
-      });
+      return sendJsonError(
+        res,
+        400,
+        'NO_IMAGE_PROVIDED',
+        'No valid image detected. Send JSON payload { "image": "data:image/jpeg;base64,..." } or multipart/form-data.',
+        { requestId, route: '/api/challenges/verify', method: 'POST', startTime }
+      );
     }
 
     const challenge = await getActiveChallenge(req.user.id);
     if (!challenge || (imagePayload.challengeId && challenge.id !== imagePayload.challengeId)) {
-      return res.status(404).json({ error: 'Active challenge not found.' });
+      return sendJsonError(
+        res,
+        404,
+        'CHALLENGE_NOT_FOUND',
+        'Active nature challenge not found. Please request a new craving first.',
+        { requestId, route: '/api/challenges/verify', method: 'POST', startTime }
+      );
     }
 
     const pet = await getOrCreatePet(req.user.id);
@@ -270,32 +280,77 @@ router.post('/challenges/verify', authMiddleware, upload.single('image'), async 
       challengeDescription: challenge.description,
       challengeCategory: challenge.category,
       petName: pet.name,
+      requestId,
     });
 
-    return res.json({ verification });
+    // Check if configuration error occurred
+    if (verification.errorCode === 'GEMINI_KEY_MISSING') {
+      return sendJsonError(
+        res,
+        503,
+        'GEMINI_KEY_MISSING',
+        verification.reason,
+        { requestId, route: '/api/challenges/verify', method: 'POST', startTime, geminiModel: 'gemini-3.8-flash' }
+      );
+    }
+
+    return sendJsonResponse(res, 200, { verification }, {
+      requestId,
+      route: '/api/challenges/verify',
+      method: 'POST',
+      startTime,
+      geminiModel: 'gemini-3.8-flash',
+      imageMime: mimeType,
+      imageSizeKb: Math.round(imagePayload.sizeBytes / 1024),
+    });
   } catch (error: any) {
     console.error('[API /challenges/verify] Error:', error);
-    return res.status(500).json({ error: error.message || 'Image verification failed' });
+    return sendJsonError(
+      res,
+      500,
+      'VERIFICATION_INTERNAL_ERROR',
+      error.message || 'Image verification failed',
+      { requestId, route: '/api/challenges/verify', method: 'POST', startTime }
+    );
   }
 });
 
-// 5. POST /api/pet/feed - Multimodal verification AND secure reward processing (Accepts JSON input OR multipart form-data)
+// 5. POST /api/pet/feed - Multimodal verification AND secure reward processing (JSON or multipart)
 router.post('/pet/feed', authMiddleware, upload.single('image'), async (req: any, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
-    const imagePayload = extractImageAndMeta(req);
+    const imagePayload = extractImagePayload(req);
     if (!imagePayload) {
-      return res.status(400).json({
-        error: 'No image uploaded. Please provide an image file (multipart/form-data) or JSON payload with base64 image ({ "image": "data:image/jpeg;base64,..." }).',
-      });
+      return sendJsonError(
+        res,
+        400,
+        'NO_IMAGE_PROVIDED',
+        'No valid image detected. Please send a JSON payload { "image": "data:image/jpeg;base64,..." } or multipart/form-data.',
+        { requestId, route: '/api/pet/feed', method: 'POST', startTime }
+      );
     }
 
     let challenge = await getActiveChallenge(req.user.id);
     if (!challenge) {
-      return res.status(400).json({ error: 'No active challenge found. Please ask Terra for a craving first!' });
+      return sendJsonError(
+        res,
+        400,
+        'NO_ACTIVE_CHALLENGE',
+        'No active challenge found. Please ask Terra for a craving first!',
+        { requestId, route: '/api/pet/feed', method: 'POST', startTime }
+      );
     }
 
     if (challenge.is_completed) {
-      return res.status(400).json({ error: 'This challenge has already been completed!' });
+      return sendJsonError(
+        res,
+        400,
+        'CHALLENGE_ALREADY_COMPLETED',
+        'This challenge has already been completed!',
+        { requestId, route: '/api/pet/feed', method: 'POST', startTime }
+      );
     }
 
     const pet = await getOrCreatePet(req.user.id);
@@ -310,17 +365,37 @@ router.post('/pet/feed', authMiddleware, upload.single('image'), async (req: any
       challengeDescription: challenge.description,
       challengeCategory: challenge.category,
       petName: pet.name,
+      requestId,
     });
+
+    // Check if configuration error occurred
+    if (verification.errorCode === 'GEMINI_KEY_MISSING') {
+      return sendJsonError(
+        res,
+        503,
+        'GEMINI_KEY_MISSING',
+        verification.reason,
+        { requestId, route: '/api/pet/feed', method: 'POST', startTime, geminiModel: 'gemini-3.8-flash' }
+      );
+    }
 
     // If verification rejected or failed, do NOT grant rewards
     if (!verification.is_valid) {
-      return res.json({
+      return sendJsonResponse(res, 200, {
         success: false,
         verification,
         message: verification.feedback,
         leveledUp: false,
         newAchievements: [],
         pet,
+      }, {
+        requestId,
+        route: '/api/pet/feed',
+        method: 'POST',
+        startTime,
+        geminiModel: 'gemini-3.8-flash',
+        imageMime: mimeType,
+        imageSizeKb: Math.round(imagePayload.sizeBytes / 1024),
       });
     }
 
@@ -405,6 +480,7 @@ router.post('/pet/feed', authMiddleware, upload.single('image'), async (req: any
       petLevel: updatedPet.level,
       petName: updatedPet.name,
       previousChallenges: allJournal.map((j) => j.title),
+      requestId,
     });
 
     const nextChallenge = await saveChallenge(req.user.id, {
@@ -418,7 +494,7 @@ router.post('/pet/feed', authMiddleware, upload.single('image'), async (req: any
       is_completed: false,
     });
 
-    return res.json({
+    return sendJsonResponse(res, 200, {
       success: true,
       verification,
       message: verification.feedback,
@@ -428,35 +504,78 @@ router.post('/pet/feed', authMiddleware, upload.single('image'), async (req: any
       journalEntry,
       newAchievements,
       nextChallenge,
+    }, {
+      requestId,
+      route: '/api/pet/feed',
+      method: 'POST',
+      startTime,
+      geminiModel: 'gemini-3.8-flash',
+      imageMime: mimeType,
+      imageSizeKb: Math.round(imagePayload.sizeBytes / 1024),
     });
   } catch (error: any) {
     console.error('[API /pet/feed] Error:', error);
-    return res.status(500).json({ error: error.message || 'Failed to feed pet' });
+    return sendJsonError(
+      res,
+      500,
+      'FEED_INTERNAL_ERROR',
+      error.message || 'Failed to feed pet',
+      { requestId, route: '/api/pet/feed', method: 'POST', startTime }
+    );
   }
 });
 
 // 6. GET /api/journal - Fetch user's nature journal
 router.get('/journal', authMiddleware, async (req: any, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const entries = await getJournalEntries(req.user.id);
-    return res.json({ journal: entries });
+    return sendJsonResponse(res, 200, { journal: entries }, {
+      requestId,
+      route: '/api/journal',
+      method: 'GET',
+      startTime,
+    });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Failed to fetch journal' });
+    return sendJsonError(res, 500, 'FETCH_JOURNAL_FAILED', error.message || 'Failed to fetch journal', {
+      requestId,
+      route: '/api/journal',
+      method: 'GET',
+      startTime,
+    });
   }
 });
 
 // 7. DELETE /api/journal/:id - Delete a journal entry
 router.delete('/journal/:id', authMiddleware, async (req: any, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const success = await deleteJournalEntry(req.user.id, req.params.id);
-    return res.json({ success });
+    return sendJsonResponse(res, 200, { success }, {
+      requestId,
+      route: `/api/journal/${req.params.id}`,
+      method: 'DELETE',
+      startTime,
+    });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Failed to delete journal entry' });
+    return sendJsonError(res, 500, 'DELETE_JOURNAL_FAILED', error.message || 'Failed to delete journal entry', {
+      requestId,
+      route: `/api/journal/${req.params.id}`,
+      method: 'DELETE',
+      startTime,
+    });
   }
 });
 
 // 8. GET /api/achievements - Fetch achievements catalog and unlocked list
 router.get('/achievements', authMiddleware, async (req: any, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
   try {
     const unlockedIds = await getUserAchievements(req.user.id);
     const achievements = ACHIEVEMENTS_CATALOG.map((ach) => ({
@@ -464,21 +583,34 @@ router.get('/achievements', authMiddleware, async (req: any, res) => {
       isUnlocked: unlockedIds.includes(ach.id),
     }));
 
-    return res.json({ achievements, unlockedCount: unlockedIds.length });
+    return sendJsonResponse(res, 200, { achievements, unlockedCount: unlockedIds.length }, {
+      requestId,
+      route: '/api/achievements',
+      method: 'GET',
+      startTime,
+    });
   } catch (error: any) {
-    return res.status(500).json({ error: error.message || 'Failed to fetch achievements' });
+    return sendJsonError(res, 500, 'FETCH_ACHIEVEMENTS_FAILED', error.message || 'Failed to fetch achievements', {
+      requestId,
+      route: '/api/achievements',
+      method: 'GET',
+      startTime,
+    });
   }
 });
 
 // 9. GET /api/health - System and connectivity status
 router.get('/health', (_req, res) => {
-  return res.json({
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
+  return sendJsonResponse(res, 200, {
     status: 'ok',
-    geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    geminiConfigured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
     supabaseConfigured: isServerSupabaseConfigured,
     model: 'gemini-3.8-flash',
     timestamp: new Date().toISOString(),
-  });
+  }, { requestId, route: '/api/health', method: 'GET', startTime });
 });
 
 export default router;

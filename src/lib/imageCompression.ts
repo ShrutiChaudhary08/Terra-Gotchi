@@ -10,6 +10,9 @@ export interface CompressionOptions {
   mimeType?: string;
 }
 
+/**
+ * Compresses an image Blob or File down to a target max dimension and JPEG quality
+ */
 export async function compressImageForUpload(
   fileOrBlob: Blob,
   options: CompressionOptions = {}
@@ -106,4 +109,22 @@ export async function compressImageForUpload(
     console.warn('[ImageCompression] Fallback to original blob:', err);
     return fileOrBlob;
   }
+}
+
+/**
+ * Converts a Blob to a Base64 data URL string safely
+ */
+export function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Failed to encode image to base64 Data URL'));
+      }
+    };
+    reader.onerror = () => reject(reader.error || new Error('FileReader error'));
+    reader.readAsDataURL(blob);
+  });
 }

@@ -1,6 +1,13 @@
 import type { Request, Response } from 'express';
 import { getUserFromToken, getOrCreatePet, getActiveChallenge } from '../../server/supabase.ts';
 import { verifyImageSubmission } from '../../server/gemini.ts';
+import {
+  extractImagePayload,
+  generateRequestId,
+  sendJsonResponse,
+  sendJsonError,
+  setStandardHeaders,
+} from '../../server/apiHelpers.ts';
 
 export const config = {
   api: {
@@ -10,87 +17,55 @@ export const config = {
   },
 };
 
-function parseBody(req: any) {
-  if (!req.body) return {};
-  if (typeof req.body === 'string') {
-    try {
-      return JSON.parse(req.body);
-    } catch {
-      return {};
-    }
-  }
-  return req.body;
-}
-
-function extractImage(body: any, file?: any): { buffer: Buffer; mimeType: string } | null {
-  if (file && file.buffer) {
-    return { buffer: file.buffer, mimeType: file.mimetype || 'image/jpeg' };
-  }
-
-  const rawImage = body?.image || body?.imageBase64 || body?.image_base64 || body?.photo || body?.data;
-  if (rawImage && typeof rawImage === 'string') {
-    let base64Data = rawImage;
-    let mimeType = body.mimeType || body.contentType || 'image/jpeg';
-
-    if (rawImage.startsWith('data:')) {
-      const match = rawImage.match(/^data:([^;]+);base64,(.*)$/);
-      if (match) {
-        mimeType = match[1];
-        base64Data = match[2];
-      } else {
-        const commaIdx = rawImage.indexOf(',');
-        if (commaIdx !== -1) {
-          base64Data = rawImage.substring(commaIdx + 1);
-        }
-      }
-    }
-
-    try {
-      const buffer = Buffer.from(base64Data, 'base64');
-      if (buffer.length > 0) {
-        return { buffer, mimeType };
-      }
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
-}
-
 export default async function handler(req: Request, res: Response) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+  setStandardHeaders(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return sendJsonError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed. Use POST.', {
+      requestId,
+      route: '/api/challenges/verify',
+      method: req.method,
+      startTime,
+    });
   }
 
   try {
     const user = await getUserFromToken(req.headers.authorization);
     if (!user) {
-      return res.status(401).json({ error: 'Unauthorized. Please sign in.' });
-    }
-
-    const body = parseBody(req);
-    const imagePayload = extractImage(body, (req as any).file);
-
-    if (!imagePayload) {
-      return res.status(400).json({
-        error: 'No image uploaded. Please provide an image file or JSON payload with base64 image ({ "image": "data:image/jpeg;base64,..." }).',
+      return sendJsonError(res, 401, 'UNAUTHORIZED', 'Unauthorized. Please sign in.', {
+        requestId,
+        route: '/api/challenges/verify',
+        method: 'POST',
+        startTime,
       });
     }
 
-    const challengeId = body.challengeId || body.challenge_id || req.query.challengeId;
-    const challenge = await getActiveChallenge(user.id);
+    const imagePayload = extractImagePayload(req);
+    if (!imagePayload) {
+      return sendJsonError(
+        res,
+        400,
+        'NO_IMAGE_PROVIDED',
+        'No valid image uploaded. Please provide an image file or JSON payload with base64 image ({ "image": "data:image/jpeg;base64,..." }).',
+        { requestId, route: '/api/challenges/verify', method: 'POST', startTime }
+      );
+    }
 
-    if (!challenge || (challengeId && challenge.id !== challengeId)) {
-      return res.status(404).json({ error: 'Active challenge not found.' });
+    const challenge = await getActiveChallenge(user.id);
+    if (!challenge || (imagePayload.challengeId && challenge.id !== imagePayload.challengeId)) {
+      return sendJsonError(
+        res,
+        404,
+        'CHALLENGE_NOT_FOUND',
+        'Active challenge not found. Please request a new craving first.',
+        { requestId, route: '/api/challenges/verify', method: 'POST', startTime }
+      );
     }
 
     const pet = await getOrCreatePet(user.id);
@@ -104,11 +79,36 @@ export default async function handler(req: Request, res: Response) {
       challengeDescription: challenge.description,
       challengeCategory: challenge.category,
       petName: pet.name,
+      requestId,
     });
 
-    return res.json({ verification });
+    if (verification.errorCode === 'GEMINI_KEY_MISSING') {
+      return sendJsonError(
+        res,
+        503,
+        'GEMINI_KEY_MISSING',
+        verification.reason,
+        { requestId, route: '/api/challenges/verify', method: 'POST', startTime, geminiModel: 'gemini-3.8-flash' }
+      );
+    }
+
+    return sendJsonResponse(res, 200, { verification }, {
+      requestId,
+      route: '/api/challenges/verify',
+      method: 'POST',
+      startTime,
+      geminiModel: 'gemini-3.8-flash',
+      imageMime: mimeType,
+      imageSizeKb: Math.round(imagePayload.sizeBytes / 1024),
+    });
   } catch (error: any) {
-    console.error('[Vercel API /challenges/verify] Error:', error);
-    return res.status(500).json({ error: error.message || 'Image verification failed' });
+    console.error(`[Vercel API /challenges/verify:${requestId}] Error:`, error);
+    return sendJsonError(
+      res,
+      500,
+      'VERIFICATION_INTERNAL_ERROR',
+      error?.message || 'Image verification failed',
+      { requestId, route: '/api/challenges/verify', method: 'POST', startTime }
+    );
   }
 }

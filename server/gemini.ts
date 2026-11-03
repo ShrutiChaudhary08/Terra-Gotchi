@@ -1,15 +1,33 @@
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import { logDiagnostic } from './apiHelpers.ts';
 
-// Initialize the shared Gemini client using recommended settings
-const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = new GoogleGenAI({
-  apiKey,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+/**
+ * Dynamically resolves the Gemini API key from environment variables
+ */
+export function getGeminiApiKey(): string {
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    ''
+  ).trim();
+}
+
+/**
+ * Returns a configured GoogleGenAI client instance or null if no key is set
+ */
+export function getGeminiClient(): GoogleGenAI | null {
+  const key = getGeminiApiKey();
+  if (!key) return null;
+  return new GoogleGenAI({
+    apiKey: key,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
     },
-  },
-});
+  });
+}
 
 export const VALID_CATEGORIES = [
   'Plant Patterns',
@@ -39,6 +57,7 @@ export interface VerificationResult {
   detected_object: string;
   reason: string;
   feedback: string;
+  errorCode?: string;
 }
 
 // Fallback pool of nature challenges if API key is unconfigured or rate limited
@@ -109,11 +128,14 @@ export async function generateAICraving(params: {
   petName: string;
   previousChallenges: string[];
   categoryPreference?: string;
+  requestId?: string;
 }): Promise<GeneratedChallenge> {
-  const { petLevel, petName, previousChallenges, categoryPreference } = params;
+  const { petLevel, petName, previousChallenges, categoryPreference, requestId = 'req-craving' } = params;
+  const startTime = Date.now();
+  const ai = getGeminiClient();
 
-  if (!apiKey) {
-    console.warn('[Gemini] No GEMINI_API_KEY detected, selecting from curated fallback challenges');
+  if (!ai) {
+    console.warn(`[Gemini:${requestId}] No GEMINI_API_KEY detected, selecting from curated fallback challenges`);
     const filtered = FALLBACK_CHALLENGES.filter(
       (c) => !previousChallenges.includes(c.challenge)
     );
@@ -171,8 +193,9 @@ The challenge MUST:
       },
     });
 
+    // 4.5s race timeout to protect against slow serverless cold starts
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('AI craving generation timeout')), 3000)
+      setTimeout(() => reject(new Error('AI craving generation timeout')), 4500)
     );
 
     const response = await Promise.race([geminiCall, timeoutPromise]);
@@ -190,6 +213,15 @@ The challenge MUST:
       : 'Medium';
     const xp_reward = Math.min(60, Math.max(15, Number(parsed.xp_reward) || 25));
 
+    logDiagnostic({
+      requestId,
+      route: '/api/challenges/generate',
+      method: 'POST',
+      status: 200,
+      durationMs: Date.now() - startTime,
+      geminiModel: 'gemini-3.8-flash',
+    });
+
     return {
       challenge: String(parsed.challenge).trim(),
       category,
@@ -197,9 +229,8 @@ The challenge MUST:
       xp_reward,
       description: String(parsed.description).trim(),
     };
-  } catch (error) {
-    console.error('[Gemini] Challenge generation error:', error);
-    // Graceful fallback to pool
+  } catch (error: any) {
+    console.warn(`[Gemini:${requestId}] Craving generation fallback triggered:`, error?.message || error);
     const pool = FALLBACK_CHALLENGES;
     return pool[Math.floor(Math.random() * pool.length)];
   }
@@ -207,6 +238,8 @@ The challenge MUST:
 
 /**
  * Multimodal image verification using Gemini 3.8 Flash
+ * Strictly validates that real nature is present and satisfies the craving.
+ * Never returns fake approvals on errors or missing credentials.
  */
 export async function verifyImageSubmission(params: {
   imageBase64: string;
@@ -215,42 +248,86 @@ export async function verifyImageSubmission(params: {
   challengeDescription: string;
   challengeCategory: string;
   petName: string;
+  requestId?: string;
 }): Promise<VerificationResult> {
-  const { imageBase64, mimeType, challengeTitle, challengeDescription, challengeCategory, petName } = params;
+  const {
+    imageBase64,
+    mimeType,
+    challengeTitle,
+    challengeDescription,
+    challengeCategory,
+    petName,
+    requestId = 'req-verify',
+  } = params;
 
-  if (!apiKey) {
-    console.warn('[Gemini] No GEMINI_API_KEY detected. Performing standard nature verification check.');
+  const startTime = Date.now();
+  const ai = getGeminiClient();
+
+  // Strip Data URL prefix if present and remove whitespace
+  const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/i, '').replace(/\s+/g, '');
+  const validMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+  const normalizedMime = validMimes.includes(mimeType?.toLowerCase()) ? mimeType.toLowerCase() : 'image/jpeg';
+  const imageSizeKb = Math.round((cleanBase64.length * 0.75) / 1024);
+
+  // If Gemini API Key is missing, do NOT return fake success!
+  if (!ai) {
+    logDiagnostic({
+      requestId,
+      route: '/api/challenges/verify',
+      method: 'POST',
+      status: 503,
+      durationMs: Date.now() - startTime,
+      geminiModel: 'gemini-3.8-flash',
+      imageMimeType: normalizedMime,
+      imageSizeKb,
+      errorCode: 'GEMINI_KEY_MISSING',
+      errorMessage: 'GEMINI_API_KEY environment variable is not configured.',
+    });
+
     return {
-      is_valid: true,
-      confidence: 0.92,
-      detected_object: 'Outdoor nature specimen',
-      reason: 'The photograph shows clear outdoor natural elements matching the general craving.',
-      feedback: `Yum! ${petName} munches happily on this fresh outdoor finding!`,
+      is_valid: false,
+      confidence: 0.0,
+      detected_object: 'AI Credentials Missing',
+      reason: 'GEMINI_API_KEY is not configured in environment variables. Please set GEMINI_API_KEY in your Vercel Project Settings > Environment Variables.',
+      feedback: `Terra needs a Gemini API key configured to examine outdoor photographs!`,
+      errorCode: 'GEMINI_KEY_MISSING',
+    };
+  }
+
+  // Validate base64 payload integrity
+  if (cleanBase64.length < 100) {
+    return {
+      is_valid: false,
+      confidence: 0.0,
+      detected_object: 'Invalid Image',
+      reason: 'The image payload was corrupted or empty. Please capture a clear photograph.',
+      feedback: `${petName} couldn't see the image clearly. Please try taking another photo!`,
+      errorCode: 'INVALID_IMAGE_PAYLOAD',
     };
   }
 
   try {
     const prompt = `You are the rigorous multimodal judge for the nature exploration game Terra-Gotchi.
-Active Challenge: "${challengeTitle}"
-Challenge Description: "${challengeDescription}"
+Active Craving: "${challengeTitle}"
+Craving Description: "${challengeDescription}"
 Category: "${challengeCategory}"
 Pet Name: "${petName}"
 
-Evaluate this submitted photograph carefully:
-1. Does the photo genuinely contain real-world nature/outdoors elements that satisfy the challenge?
+Evaluate this photograph carefully against the craving:
+1. Does the photo genuinely contain real-world nature/outdoors elements that satisfy the craving?
 2. Is the requested object or pattern clearly discernible in the photo?
-3. Reject indoor artificial scenes (computer screens, television, indoor furniture, synthetic plastic plants, walls, floors, empty blur).
+3. Strictly reject indoor artificial scenes: computer screens, television, indoor furniture, synthetic plastic plants, indoors walls, floors, empty blur.
 4. If the photograph is too blurry, dark, ambiguous, or lacks the required feature, reject it or set confidence low.
-5. Provide a confidence score between 0.00 and 1.00. (Only score >= 0.70 if the challenge is genuinely satisfied).
+5. Provide a confidence score between 0.00 and 1.00. (Only score >= 0.70 if the craving is genuinely satisfied).
 6. Provide an in-character feedback message from ${petName}: enthusiastic gratitude if valid, or a polite encouraging hint if invalid.`;
 
-    const response = await ai.models.generateContent({
+    const geminiCall = ai.models.generateContent({
       model: 'gemini-3.8-flash',
       contents: [
         {
           inlineData: {
-            mimeType: mimeType || 'image/jpeg',
-            data: imageBase64,
+            mimeType: normalizedMime,
+            data: cleanBase64,
           },
         },
         {
@@ -291,6 +368,12 @@ Evaluate this submitted photograph carefully:
       },
     });
 
+    // 8.5-second race timeout prevents Vercel serverless 10s hard cutoff
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Gemini image analysis timed out after 8.5 seconds')), 8500)
+    );
+
+    const response = await Promise.race([geminiCall, timeoutPromise]);
     const text = response.text;
     if (!text) throw new Error('Empty response from Gemini vision analysis');
 
@@ -298,21 +381,51 @@ Evaluate this submitted photograph carefully:
     const confidence = Math.min(1.0, Math.max(0.0, Number(parsed.confidence) || 0.5));
     const isValid = Boolean(parsed.is_valid) && confidence >= 0.65;
 
+    logDiagnostic({
+      requestId,
+      route: '/api/challenges/verify',
+      method: 'POST',
+      status: 200,
+      durationMs: Date.now() - startTime,
+      geminiModel: 'gemini-3.8-flash',
+      imageMimeType: normalizedMime,
+      imageSizeKb,
+    });
+
     return {
       is_valid: isValid,
       confidence: Number(confidence.toFixed(2)),
-      detected_object: String(parsed.detected_object || 'Outdoor element'),
+      detected_object: String(parsed.detected_object || 'Outdoor specimen'),
       reason: String(parsed.reason || 'Image evaluated by Gemini vision.'),
       feedback: String(parsed.feedback || (isValid ? `Munch munch! ${petName} loves it!` : `Hmm, that doesn't quite match. Let's look outside again!`)),
     };
-  } catch (error) {
-    console.error('[Gemini] Image verification error:', error);
+  } catch (error: any) {
+    const duration = Date.now() - startTime;
+    const isTimeout = error?.message?.includes('timed out');
+    const errorCode = isTimeout ? 'GEMINI_TIMEOUT' : 'GEMINI_ANALYSIS_FAILED';
+
+    logDiagnostic({
+      requestId,
+      route: '/api/challenges/verify',
+      method: 'POST',
+      status: isTimeout ? 504 : 502,
+      durationMs: duration,
+      geminiModel: 'gemini-3.8-flash',
+      imageMimeType: normalizedMime,
+      imageSizeKb,
+      errorCode,
+      errorMessage: error?.message || 'Gemini error',
+    });
+
     return {
       is_valid: false,
       confidence: 0.0,
-      detected_object: 'Analysis error',
-      reason: 'Failed to verify photograph through vision service. Please ensure the image is clear and try again.',
+      detected_object: isTimeout ? 'Analysis Timeout' : 'Analysis Error',
+      reason: isTimeout
+        ? 'The image analysis took longer than expected. Please check your network and try snapping another photo.'
+        : `Gemini vision verification could not complete: ${error?.message || 'Check image format and API key.'}`,
       feedback: `${petName} couldn't see the photo clearly. Please try snapping another one!`,
+      errorCode,
     };
   }
 }

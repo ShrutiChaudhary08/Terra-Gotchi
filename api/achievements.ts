@@ -1,24 +1,35 @@
 import type { Request, Response } from 'express';
 import { getUserFromToken, getUserAchievements } from '../server/supabase.ts';
-import { ACHIEVEMENTS_CATALOG } from '../server/routes.ts';
+import { ACHIEVEMENTS_CATALOG } from '../server/achievements.ts';
+import { generateRequestId, sendJsonResponse, sendJsonError, setStandardHeaders } from '../server/apiHelpers.ts';
 
 export default async function handler(req: Request, res: Response) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+  setStandardHeaders(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
   if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return sendJsonError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed', {
+      requestId,
+      route: '/api/achievements',
+      method: req.method,
+      startTime,
+    });
   }
 
   try {
     const user = await getUserFromToken(req.headers.authorization);
     if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendJsonError(res, 401, 'UNAUTHORIZED', 'Unauthorized', {
+        requestId,
+        route: '/api/achievements',
+        method: 'GET',
+        startTime,
+      });
     }
 
     const unlockedIds = await getUserAchievements(user.id);
@@ -27,8 +38,18 @@ export default async function handler(req: Request, res: Response) {
       isUnlocked: unlockedIds.includes(ach.id),
     }));
 
-    return res.json({ achievements, unlockedCount: unlockedIds.length });
+    return sendJsonResponse(res, 200, { achievements, unlockedCount: unlockedIds.length }, {
+      requestId,
+      route: '/api/achievements',
+      method: 'GET',
+      startTime,
+    });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Server error' });
+    return sendJsonError(res, 500, 'ACHIEVEMENTS_ERROR', err.message || 'Server error', {
+      requestId,
+      route: '/api/achievements',
+      method: 'GET',
+      startTime,
+    });
   }
 }

@@ -1,22 +1,17 @@
 import type { Request, Response } from 'express';
 import { getUserFromToken, getJournalEntries, deleteJournalEntry } from '../server/supabase.ts';
-
-function parseBody(req: any) {
-  if (!req.body) return {};
-  if (typeof req.body === 'string') {
-    try {
-      return JSON.parse(req.body);
-    } catch {
-      return {};
-    }
-  }
-  return req.body;
-}
+import {
+  parseRequestBody,
+  generateRequestId,
+  sendJsonResponse,
+  sendJsonError,
+  setStandardHeaders,
+} from '../server/apiHelpers.ts';
 
 export default async function handler(req: Request, res: Response) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+  setStandardHeaders(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -25,24 +20,56 @@ export default async function handler(req: Request, res: Response) {
   try {
     const user = await getUserFromToken(req.headers.authorization);
     if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendJsonError(res, 401, 'UNAUTHORIZED', 'Unauthorized. Please sign in.', {
+        requestId,
+        route: '/api/journal',
+        method: req.method,
+        startTime,
+      });
     }
 
     if (req.method === 'GET') {
       const entries = await getJournalEntries(user.id);
-      return res.json({ journal: entries });
+      return sendJsonResponse(res, 200, { journal: entries }, {
+        requestId,
+        route: '/api/journal',
+        method: 'GET',
+        startTime,
+      });
     }
 
     if (req.method === 'DELETE') {
-      const body = parseBody(req);
+      const body = parseRequestBody(req);
       const id = (req.query.id as string) || body?.id;
-      if (!id) return res.status(400).json({ error: 'Missing journal id' });
+      if (!id) {
+        return sendJsonError(res, 400, 'MISSING_ID', 'Missing journal entry id', {
+          requestId,
+          route: '/api/journal',
+          method: 'DELETE',
+          startTime,
+        });
+      }
       const success = await deleteJournalEntry(user.id, id);
-      return res.json({ success });
+      return sendJsonResponse(res, 200, { success }, {
+        requestId,
+        route: '/api/journal',
+        method: 'DELETE',
+        startTime,
+      });
     }
 
-    return res.status(405).json({ error: 'Method not allowed' });
+    return sendJsonError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed', {
+      requestId,
+      route: '/api/journal',
+      method: req.method,
+      startTime,
+    });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Server error' });
+    return sendJsonError(res, 500, 'JOURNAL_ERROR', err.message || 'Server error', {
+      requestId,
+      route: '/api/journal',
+      method: req.method,
+      startTime,
+    });
   }
 }

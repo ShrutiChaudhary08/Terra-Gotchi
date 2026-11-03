@@ -331,9 +331,16 @@ export const SubmissionModal: React.FC<SubmissionModalProps> = ({
 
           {/* Analysis Error Message */}
           {analysisError && (
-            <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-center gap-2">
-              <AlertCircle size={16} className="shrink-0 text-red-600" />
-              <span>{analysisError}</span>
+            <div className="mb-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex flex-col gap-1.5 shadow-xs">
+              <div className="flex items-start gap-2">
+                <AlertCircle size={16} className="shrink-0 text-rose-600 mt-0.5" />
+                <span className="font-semibold leading-relaxed">{analysisError}</span>
+              </div>
+              {analysisError.toLowerCase().includes('gemini_api_key') && (
+                <div className="ml-6 p-2 rounded-xl bg-white/80 border border-rose-200/60 text-[11px] text-rose-800">
+                  💡 <strong>Tip for Vercel:</strong> In your Vercel Dashboard, open <em>Settings &gt; Environment Variables</em>, add <code>GEMINI_API_KEY</code>, and trigger a redeployment.
+                </div>
+              )}
             </div>
           )}
 

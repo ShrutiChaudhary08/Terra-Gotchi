@@ -14,7 +14,14 @@ import {
 } from '../../server/supabase.ts';
 import { verifyImageSubmission, generateAICraving } from '../../server/gemini.ts';
 import { computeFeedingRewards, computeStreakUpdate, evaluateAchievements } from '../../server/gameLogic.ts';
-import { ACHIEVEMENTS_CATALOG } from '../../server/routes.ts';
+import { ACHIEVEMENTS_CATALOG } from '../../server/achievements.ts';
+import {
+  extractImagePayload,
+  generateRequestId,
+  sendJsonResponse,
+  sendJsonError,
+  setStandardHeaders,
+} from '../../server/apiHelpers.ts';
 
 export const config = {
   api: {
@@ -24,90 +31,65 @@ export const config = {
   },
 };
 
-function parseBody(req: any) {
-  if (!req.body) return {};
-  if (typeof req.body === 'string') {
-    try {
-      return JSON.parse(req.body);
-    } catch {
-      return {};
-    }
-  }
-  return req.body;
-}
-
-function extractImage(body: any, file?: any): { buffer: Buffer; mimeType: string } | null {
-  if (file && file.buffer) {
-    return { buffer: file.buffer, mimeType: file.mimetype || 'image/jpeg' };
-  }
-
-  const rawImage = body?.image || body?.imageBase64 || body?.image_base64 || body?.photo || body?.data;
-  if (rawImage && typeof rawImage === 'string') {
-    let base64Data = rawImage;
-    let mimeType = body.mimeType || body.contentType || 'image/jpeg';
-
-    if (rawImage.startsWith('data:')) {
-      const match = rawImage.match(/^data:([^;]+);base64,(.*)$/);
-      if (match) {
-        mimeType = match[1];
-        base64Data = match[2];
-      } else {
-        const commaIdx = rawImage.indexOf(',');
-        if (commaIdx !== -1) {
-          base64Data = rawImage.substring(commaIdx + 1);
-        }
-      }
-    }
-
-    try {
-      const buffer = Buffer.from(base64Data, 'base64');
-      if (buffer.length > 0) {
-        return { buffer, mimeType };
-      }
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
-}
-
 export default async function handler(req: Request, res: Response) {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+  setStandardHeaders(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return sendJsonError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed. Use POST.', {
+      requestId,
+      route: '/api/pet/feed',
+      method: req.method,
+      startTime,
+    });
   }
 
   try {
     const user = await getUserFromToken(req.headers.authorization);
     if (!user) {
-      return res.status(401).json({ error: 'Unauthorized. Please sign in.' });
+      return sendJsonError(res, 401, 'UNAUTHORIZED', 'Unauthorized. Please sign in.', {
+        requestId,
+        route: '/api/pet/feed',
+        method: 'POST',
+        startTime,
+      });
     }
 
-    const body = parseBody(req);
-    const imagePayload = extractImage(body, (req as any).file);
-
+    const imagePayload = extractImagePayload(req);
     if (!imagePayload) {
-      return res.status(400).json({
-        error: 'No image uploaded. Please provide an image file or JSON payload with base64 image ({ "image": "data:image/jpeg;base64,..." }).',
-      });
+      return sendJsonError(
+        res,
+        400,
+        'NO_IMAGE_PROVIDED',
+        'No valid image detected. Please send a JSON payload { "image": "data:image/jpeg;base64,..." } or multipart/form-data.',
+        { requestId, route: '/api/pet/feed', method: 'POST', startTime }
+      );
     }
 
     let challenge = await getActiveChallenge(user.id);
     if (!challenge) {
-      return res.status(400).json({ error: 'No active challenge found. Please ask Terra for a craving first!' });
+      return sendJsonError(
+        res,
+        400,
+        'NO_ACTIVE_CHALLENGE',
+        'No active challenge found. Please ask Terra for a craving first!',
+        { requestId, route: '/api/pet/feed', method: 'POST', startTime }
+      );
     }
 
     if (challenge.is_completed) {
-      return res.status(400).json({ error: 'This challenge has already been completed!' });
+      return sendJsonError(
+        res,
+        400,
+        'CHALLENGE_ALREADY_COMPLETED',
+        'This challenge has already been completed!',
+        { requestId, route: '/api/pet/feed', method: 'POST', startTime }
+      );
     }
 
     const pet = await getOrCreatePet(user.id);
@@ -122,16 +104,37 @@ export default async function handler(req: Request, res: Response) {
       challengeDescription: challenge.description,
       challengeCategory: challenge.category,
       petName: pet.name,
+      requestId,
     });
 
+    // Check if Gemini API key is missing
+    if (verification.errorCode === 'GEMINI_KEY_MISSING') {
+      return sendJsonError(
+        res,
+        503,
+        'GEMINI_KEY_MISSING',
+        verification.reason,
+        { requestId, route: '/api/pet/feed', method: 'POST', startTime, geminiModel: 'gemini-3.8-flash' }
+      );
+    }
+
+    // If verification rejected or failed, do NOT grant rewards
     if (!verification.is_valid) {
-      return res.json({
+      return sendJsonResponse(res, 200, {
         success: false,
         verification,
         message: verification.feedback,
         leveledUp: false,
         newAchievements: [],
         pet,
+      }, {
+        requestId,
+        route: '/api/pet/feed',
+        method: 'POST',
+        startTime,
+        geminiModel: 'gemini-3.8-flash',
+        imageMime: mimeType,
+        imageSizeKb: Math.round(imagePayload.sizeBytes / 1024),
       });
     }
 
@@ -201,6 +204,7 @@ export default async function handler(req: Request, res: Response) {
       petLevel: updatedPet.level,
       petName: updatedPet.name,
       previousChallenges: allJournal.map((j) => j.title),
+      requestId,
     });
 
     const nextChallenge = await saveChallenge(user.id, {
@@ -214,7 +218,7 @@ export default async function handler(req: Request, res: Response) {
       is_completed: false,
     });
 
-    return res.json({
+    return sendJsonResponse(res, 200, {
       success: true,
       verification,
       message: verification.feedback,
@@ -224,9 +228,23 @@ export default async function handler(req: Request, res: Response) {
       journalEntry,
       newAchievements,
       nextChallenge,
+    }, {
+      requestId,
+      route: '/api/pet/feed',
+      method: 'POST',
+      startTime,
+      geminiModel: 'gemini-3.8-flash',
+      imageMime: mimeType,
+      imageSizeKb: Math.round(imagePayload.sizeBytes / 1024),
     });
   } catch (error: any) {
-    console.error('[Vercel API /pet/feed] Error:', error);
-    return res.status(500).json({ error: error.message || 'Failed to feed pet' });
+    console.error(`[Vercel API /pet/feed:${requestId}] Error:`, error);
+    return sendJsonError(
+      res,
+      500,
+      'FEED_INTERNAL_ERROR',
+      error?.message || 'Failed to feed pet',
+      { requestId, route: '/api/pet/feed', method: 'POST', startTime }
+    );
   }
 }

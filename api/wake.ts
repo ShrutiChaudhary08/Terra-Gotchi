@@ -1,10 +1,11 @@
 import type { Request, Response } from 'express';
 import { getUserFromToken, getOrCreatePet, getActiveChallenge, saveChallenge } from '../server/supabase.ts';
+import { generateRequestId, sendJsonResponse, sendJsonError, setStandardHeaders } from '../server/apiHelpers.ts';
 
 export default async function handler(req: Request, res: Response) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+  setStandardHeaders(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -13,7 +14,12 @@ export default async function handler(req: Request, res: Response) {
   try {
     const user = await getUserFromToken(req.headers.authorization);
     if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendJsonError(res, 401, 'UNAUTHORIZED', 'Unauthorized. Please sign in.', {
+        requestId,
+        route: '/api/wake',
+        method: 'GET',
+        startTime,
+      });
     }
 
     const pet = await getOrCreatePet(user.id);
@@ -39,12 +45,17 @@ export default async function handler(req: Request, res: Response) {
       });
     }
 
-    return res.json({
+    return sendJsonResponse(res, 200, {
       message: activeChallenge.title,
       pet,
       activeChallenge,
-    });
+    }, { requestId, route: '/api/wake', method: 'GET', startTime });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Error waking up pet' });
+    return sendJsonError(res, 500, 'WAKE_ERROR', err.message || 'Error waking up pet', {
+      requestId,
+      route: '/api/wake',
+      method: 'GET',
+      startTime,
+    });
   }
 }

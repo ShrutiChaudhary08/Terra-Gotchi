@@ -8,24 +8,19 @@ import {
   getUserAchievements,
   updatePet,
 } from '../server/supabase.ts';
-import { ACHIEVEMENTS_CATALOG } from '../server/routes.ts';
-
-function parseBody(req: any) {
-  if (!req.body) return {};
-  if (typeof req.body === 'string') {
-    try {
-      return JSON.parse(req.body);
-    } catch {
-      return {};
-    }
-  }
-  return req.body;
-}
+import { ACHIEVEMENTS_CATALOG } from '../server/achievements.ts';
+import {
+  parseRequestBody,
+  generateRequestId,
+  sendJsonResponse,
+  sendJsonError,
+  setStandardHeaders,
+} from '../server/apiHelpers.ts';
 
 export default async function handler(req: Request, res: Response) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+  setStandardHeaders(res);
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -34,7 +29,12 @@ export default async function handler(req: Request, res: Response) {
   try {
     const user = await getUserFromToken(req.headers.authorization);
     if (!user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendJsonError(res, 401, 'UNAUTHORIZED', 'Unauthorized. Please sign in.', {
+        requestId,
+        route: '/api/pet',
+        method: req.method,
+        startTime,
+      });
     }
 
     if (req.method === 'GET') {
@@ -64,7 +64,7 @@ export default async function handler(req: Request, res: Response) {
       const journal = await getJournalEntries(user.id);
       const unlockedAchievements = await getUserAchievements(user.id);
 
-      return res.json({
+      return sendJsonResponse(res, 200, {
         pet,
         activeChallenge,
         stats: {
@@ -72,21 +72,46 @@ export default async function handler(req: Request, res: Response) {
           unlockedCount: unlockedAchievements.length,
           totalAchievements: ACHIEVEMENTS_CATALOG.length,
         },
+      }, {
+        requestId,
+        route: '/api/pet',
+        method: 'GET',
+        startTime,
       });
     }
 
     if (req.method === 'PUT') {
-      const body = parseBody(req);
+      const body = parseRequestBody(req);
       const name = body?.name;
       if (!name || typeof name !== 'string' || name.trim().length > 30) {
-        return res.status(400).json({ error: 'Valid pet name required (max 30 chars).' });
+        return sendJsonError(res, 400, 'INVALID_NAME', 'Valid pet name required (max 30 chars).', {
+          requestId,
+          route: '/api/pet',
+          method: 'PUT',
+          startTime,
+        });
       }
       const updated = await updatePet(user.id, { name: name.trim() });
-      return res.json({ pet: updated });
+      return sendJsonResponse(res, 200, { pet: updated }, {
+        requestId,
+        route: '/api/pet',
+        method: 'PUT',
+        startTime,
+      });
     }
 
-    return res.status(405).json({ error: 'Method not allowed' });
+    return sendJsonError(res, 405, 'METHOD_NOT_ALLOWED', 'Method not allowed', {
+      requestId,
+      route: '/api/pet',
+      method: req.method,
+      startTime,
+    });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Server error' });
+    return sendJsonError(res, 500, 'PET_ERROR', err.message || 'Server error', {
+      requestId,
+      route: '/api/pet',
+      method: req.method,
+      startTime,
+    });
   }
 }

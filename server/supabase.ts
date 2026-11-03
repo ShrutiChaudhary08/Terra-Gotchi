@@ -28,7 +28,20 @@ export const supabaseServer: SupabaseClient | null = isServerSupabaseConfigured
 // ====================================================================
 // PERSISTENT LOCAL STORE (Used when Supabase is unconfigured or guest)
 // ====================================================================
-const LOCAL_STORE_PATH = path.join(__dirname, '..', 'terra_local_store.json');
+function getLocalStorePath(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join('/tmp', 'terra_local_store.json');
+  }
+  try {
+    const localDir = path.join(__dirname, '..');
+    fs.accessSync(localDir, fs.constants.W_OK);
+    return path.join(localDir, 'terra_local_store.json');
+  } catch {
+    return path.join('/tmp', 'terra_local_store.json');
+  }
+}
+
+const LOCAL_STORE_PATH = getLocalStorePath();
 
 export interface UserPetRecord {
   id: string;
@@ -81,8 +94,9 @@ interface LocalStoreData {
 
 function loadLocalStore(): LocalStoreData {
   try {
-    if (fs.existsSync(LOCAL_STORE_PATH)) {
-      return JSON.parse(fs.readFileSync(LOCAL_STORE_PATH, 'utf-8'));
+    const storePath = getLocalStorePath();
+    if (fs.existsSync(storePath)) {
+      return JSON.parse(fs.readFileSync(storePath, 'utf-8'));
     }
   } catch (err) {
     console.warn('[LocalStore] Error reading store, initializing fresh:', err);
@@ -97,9 +111,10 @@ function loadLocalStore(): LocalStoreData {
 
 function saveLocalStore(data: LocalStoreData) {
   try {
-    fs.writeFileSync(LOCAL_STORE_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    const storePath = getLocalStorePath();
+    fs.writeFileSync(storePath, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
-    console.error('[LocalStore] Error saving store:', err);
+    console.warn('[LocalStore] Non-fatal store write failure (in-memory state preserved):', err);
   }
 }
 

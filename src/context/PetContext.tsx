@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import confetti from 'canvas-confetti';
 import { useAuth } from './AuthContext.tsx';
 import type { Pet, Challenge, JournalEntry, Achievement, PetMood, FeedResponse } from '../types.ts';
+import { safeFetchJson } from '../lib/apiClient.ts';
+import { compressImageForUpload, blobToBase64 } from '../lib/imageCompression.ts';
 
 interface PetContextType {
   pet: Pet;
@@ -182,57 +184,48 @@ export const PetProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const fetchPetData = useCallback(async () => {
     try {
       const token = await getAuthToken();
-      const res = await fetch('/api/pet', {
+      const data = await safeFetchJson<{ pet?: Pet; activeChallenge?: Challenge }>('/api/pet', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.pet) {
-          setPet(data.pet);
-          localStorage.setItem('terra_pet_cache', JSON.stringify(data.pet));
-        }
-        if (data.activeChallenge) {
-          setActiveChallenge(data.activeChallenge);
-          localStorage.setItem('terra_challenge_cache', JSON.stringify(data.activeChallenge));
-        }
-        // Default initial mood based on stats
-        if (data.pet?.hunger > 60) setPetMood('hungry');
-        else if (data.pet?.happiness > 70) setPetMood('happy');
+      if (data.pet) {
+        setPet(data.pet);
+        localStorage.setItem('terra_pet_cache', JSON.stringify(data.pet));
       }
+      if (data.activeChallenge) {
+        setActiveChallenge(data.activeChallenge);
+        localStorage.setItem('terra_challenge_cache', JSON.stringify(data.activeChallenge));
+      }
+      // Default initial mood based on stats
+      if (data.pet && data.pet.hunger > 60) setPetMood('hungry');
+      else if (data.pet && data.pet.happiness > 70) setPetMood('happy');
     } catch (err) {
-      console.error('[PetContext] Error fetching pet:', err);
+      console.warn('[PetContext] Error fetching pet stats:', err);
     }
   }, [getAuthToken]);
 
   const fetchJournal = useCallback(async () => {
     try {
       const token = await getAuthToken();
-      const res = await fetch('/api/journal', {
+      const data = await safeFetchJson<{ journal?: JournalEntry[] }>('/api/journal', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        const entries = data.journal || [];
-        setJournal(entries);
-        localStorage.setItem('terra_journal_cache', JSON.stringify(entries));
-      }
+      const entries = data.journal || [];
+      setJournal(entries);
+      localStorage.setItem('terra_journal_cache', JSON.stringify(entries));
     } catch (err) {
-      console.error('[PetContext] Error fetching journal:', err);
+      console.warn('[PetContext] Error fetching journal:', err);
     }
   }, [getAuthToken]);
 
   const fetchAchievements = useCallback(async () => {
     try {
       const token = await getAuthToken();
-      const res = await fetch('/api/achievements', {
+      const data = await safeFetchJson<{ achievements?: Achievement[] }>('/api/achievements', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setAchievements(data.achievements || []);
-      }
+      setAchievements(data.achievements || []);
     } catch (err) {
-      console.error('[PetContext] Error fetching achievements:', err);
+      console.warn('[PetContext] Error fetching achievements:', err);
     }
   }, [getAuthToken]);
 
@@ -257,7 +250,7 @@ export const PetProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPetMood('thinking');
     try {
       const token = await getAuthToken();
-      const res = await fetch('/api/challenges/generate', {
+      const data = await safeFetchJson<{ challenge: Challenge }>('/api/challenges/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -265,40 +258,55 @@ export const PetProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         },
         body: JSON.stringify({ category }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setActiveChallenge(data.challenge);
-        setPetMood('hungry');
-        speakPetReaction(`I'm craving: ${data.challenge.title}!`);
-      }
-    } catch (err) {
+      setActiveChallenge(data.challenge);
+      setPetMood('hungry');
+      speakPetReaction(`I'm craving: ${data.challenge.title}!`);
+    } catch (err: any) {
       console.error('[PetContext] Error generating challenge:', err);
       setPetMood('hungry');
+      setNotification({
+        title: 'Craving Generation',
+        message: err.message || 'Could not reach AI game director. Try again.',
+        type: 'info',
+      });
     } finally {
       setIsActionLoading(false);
     }
   };
 
-  // Feed pet with photo
+  // Feed pet with photo - compresses client-side to <250KB and transmits clean JSON base64
   const feedPetWithPhoto = async (imageBlob: Blob): Promise<FeedResponse> => {
     setIsActionLoading(true);
     setPetMood('thinking');
 
     try {
       const token = await getAuthToken();
-      const formData = new FormData();
-      formData.append('image', imageBlob, 'nature_photo.jpg');
-      if (activeChallenge) {
-        formData.append('challengeId', activeChallenge.id);
-      }
 
-      const res = await fetch('/api/pet/feed', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+      // 1. Client-side compression down to max 1024px
+      const compressedBlob = await compressImageForUpload(imageBlob, {
+        maxDimension: 1024,
+        quality: 0.82,
+        mimeType: 'image/jpeg',
       });
 
-      const data: FeedResponse = await res.json();
+      // 2. Convert to clean Base64 data URL
+      const base64Data = await blobToBase64(compressedBlob);
+
+      // 3. Send clean JSON payload (completely avoids Vercel multipart body parser limitations)
+      const payload = {
+        image: base64Data,
+        challengeId: activeChallenge?.id,
+        mimeType: 'image/jpeg',
+      };
+
+      const data = await safeFetchJson<FeedResponse>('/api/pet/feed', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
 
       if (data.success) {
         setPet(data.pet);
@@ -357,7 +365,7 @@ export const PetProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updatePetName = async (newName: string): Promise<boolean> => {
     try {
       const token = await getAuthToken();
-      const res = await fetch('/api/pet', {
+      const data = await safeFetchJson<{ pet: Pet }>('/api/pet', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -365,17 +373,13 @@ export const PetProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         },
         body: JSON.stringify({ name: newName }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setPet(data.pet);
-        setNotification({
-          title: 'Pet Renamed',
-          message: `Your companion is now called ${data.pet.name}!`,
-          type: 'success',
-        });
-        return true;
-      }
-      return false;
+      setPet(data.pet);
+      setNotification({
+        title: 'Pet Renamed',
+        message: `Your companion is now called ${data.pet.name}!`,
+        type: 'success',
+      });
+      return true;
     } catch (err) {
       console.error('Rename error:', err);
       return false;
@@ -385,11 +389,11 @@ export const PetProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deleteJournalEntryById = async (id: string): Promise<boolean> => {
     try {
       const token = await getAuthToken();
-      const res = await fetch(`/api/journal/${id}`, {
+      const data = await safeFetchJson<{ success: boolean }>(`/api/journal/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
+      if (data.success) {
         setJournal((prev) => prev.filter((item) => item.id !== id));
         return true;
       }
